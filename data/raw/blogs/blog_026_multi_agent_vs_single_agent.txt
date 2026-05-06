@@ -1,0 +1,349 @@
+# How do you decide when to use multi-agent systems vs a single-agent setup?
+
+Well, basically, an agent system is an LLM connected to tools and steps so it can actually complete work, not just chat back. They exist because real tasks are messy and multi step, and you need something that can plan, fetch info, and take actions safely. What makes them different from a normal chatbot is the tool use and the workflow control, a chatbot mostly just talks. A simple mental model is one worker doing everything versus a small team where each person has a clear job and a handoff. A common beginner mistake is splitting into many agents too early, then spending weeks debugging agent coordination instead of shipping the product.
+
+
+
+
+
+
+
+## Real-world example
+
+Microsoft is a reasonable company example here because Copilot style products are publicly known and the “many skills” problem is obvious at that scale. In a Microsoft Copilot like workflow, one user request can touch calendar, email, files, and policy rules, and the system often benefits from separating responsibilities. You might have one agent focused on retrieval and grounding, one focused on planning and orchestration, and one focused on writing the final response in the right tone. The point is not to make it fancy, it is to keep each component predictable. If the retrieval part fails, you want that to be visible and contained, not tangled with the writing part. Multi-agent can also help you run different safety checks before you take an action like sending an email. That said, even Microsoft scale teams often start with a single orchestrator agent and only split when the system becomes hard to reason about. The “right” design is usually the smallest one that stays understandable while meeting reliability and safety goals.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**Temporal**  
+
+Good at orchestrating multi step workflows with retries, state, and long running processes.  
+
+Production-friendly because it provides durable execution, visibility, and strong failure handling.
+
+**Kubernetes**  
+
+Good at running multiple services or workers (agents) and scaling them independently.  
+
+Production-friendly because it supports health checks, autoscaling, isolation, and predictable deployments.
+
+**OpenTelemetry**  
+
+Good at tracing a request across multiple agents and tools so you can see where time and failures happen.  
+
+Production-friendly because it standardizes traces and metrics and works with most stacks.
+
+**Redis**  
+
+Good at fast shared state, caching, rate limiting counters, and lightweight queues.  
+
+Production-friendly because it is widely operated, has mature tooling, and performs well under load.
+
+### Experimentation / prototyping options
+
+**LangGraph**  
+
+Good at quickly sketching agent graphs and state machines without building a full service platform.  
+
+Great for prototyping because it makes it easy to see transitions and test ideas.
+
+**LangChain**  
+
+Good for trying tool calling and simple multi step chains.  
+
+Great for prototyping because it reduces glue code while you learn.
+
+**Jupyter Notebook**  
+
+Good for testing prompts, routing logic, and tiny evals.  
+
+Great for prototyping because iteration is fast and you can inspect outputs easily.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: Temporal
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We are going to build a customer support triage workflow that can run as a single agent or as a small multi agent setup, but we will implement it as a workflow first. I like this because it forces you to be honest about the steps.  
+
+We will use Temporal to coordinate the steps, because production is mostly about what happens when step 3 fails at 2am.  
+
+We will install `temporalio` to define workflows and activities, `pydantic` for input validation, and `python-json-logger` for structured logs you can actually search.  
+
+We will use environment variables for config like Temporal address and API keys, because hardcoding secrets is a classic self-own.  
+
+We will add retries with backoff around external calls, because LLM endpoints and ticketing APIs will fail sometimes.  
+
+We will add timeouts per activity so nothing hangs forever.  
+
+We will add deterministic tool interfaces, meaning every activity has clear inputs and outputs that can be tested.  
+
+We will add an evaluation hook that checks the routing decision and the “escalate” decision follow policy.  
+
+We will add safe prompting constraints for the LLM step so it cannot invent policy.  
+
+And we will leave a clear spot for telemetry using OpenTelemetry or just logs and metrics, because multi agent without observability is basically guessing.  
+
+Production features we are explicitly including: env var config, input validation, structured logging, correlation ids, retries with backoff, timeouts, idempotency keys, fallbacks, circuit breaker style behavior (simple), evaluation hook, safe prompting constraints, and a telemetry hook.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install temporalio pydantic pydantic-settings tenacity python-json-logger httpx
+
+import os
+import time
+import uuid
+import logging
+from typing import Literal, Optional, Dict, Any
+
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+from pythonjsonlogger import jsonlogger
+from temporalio import workflow, activity
+
+class Settings(BaseSettings):
+    TEMPORAL_TASK_QUEUE: str = Field(default="support-triage")
+    LLM_BASE_URL: str = Field(default="http://localhost:8001")
+    LLM_TIMEOUT_S: float = Field(default=8.0)
+    MAX_TEXT_CHARS: int = Field(default=4000)
+
+settings = Settings()
+
+logger = logging.getLogger("support_workflow")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s %(request_id)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+class TicketIn(BaseModel):
+    ticket_id: str = Field(min_length=1)
+    user_text: str = Field(min_length=10, max_length=settings.MAX_TEXT_CHARS)
+    channel: Literal["email", "chat"] = "chat"
+
+class TriageOut(BaseModel):
+    category: Literal["billing", "account", "bug", "other"]
+    escalate: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str = Field(default="")
+
+def safe_prompt(ticket: TicketIn) -> str:
+    rules = (
+        "You are a support triage assistant.\n"
+        "Rules:\n"
+        "1) Only classify into: billing, account, bug, other.\n"
+        "2) If you are unsure, choose other and set escalate=true.\n"
+        "3) Do not ask for passwords or secrets.\n"
+        "4) Output JSON with keys: category, escalate, confidence, rationale.\n"
+    )
+    return f"{rules}\nTicket:\n{ticket.user_text}\n"
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
+)
+def call_llm(prompt: str) -> Dict[str, Any]:
+    with httpx.Client(timeout=settings.LLM_TIMEOUT_S) as client:
+        r = client.post(
+            f"{settings.LLM_BASE_URL}/triage",
+            json={"prompt": prompt},
+        )
+        r.raise_for_status()
+        return r.json()
+
+def eval_hook(triage: TriageOut) -> None:
+    if triage.category not in {"billing", "account", "bug", "other"}:
+        raise RuntimeError("Invalid category")
+    if triage.confidence < 0.4 and not triage.escalate:
+        raise RuntimeError("Low confidence must escalate")
+
+@activity.defn
+async def triage_activity(ticket: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    t = TicketIn(**ticket)
+    prompt = safe_prompt(t)
+
+    logger.info("triage_start", extra={"request_id": request_id, "ticket_id": t.ticket_id})
+
+    # External call with retries and timeout happens inside call_llm()
+    data = call_llm(prompt)
+
+    triage = TriageOut(**data)
+    eval_hook(triage)
+
+    logger.info(
+        "triage_done",
+        extra={
+            "request_id": request_id,
+            "ticket_id": t.ticket_id,
+            "category": triage.category,
+            "escalate": triage.escalate,
+            "confidence": triage.confidence,
+        },
+    )
+
+    # Telemetry hook: emit metrics/traces here
+    return triage.model_dump()
+
+@workflow.defn
+class SupportTriageWorkflow:
+    @workflow.run
+    async def run(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
+        request_id = str(uuid.uuid4())
+
+        triage = await workflow.execute_activity(
+            triage_activity,
+            ticket,
+            request_id,
+            start_to_close_timeout=15,
+            retry_policy=workflow.RetryPolicy(
+                initial_interval=0.2,
+                maximum_interval=2.0,
+                maximum_attempts=3,
+            ),
+        )
+
+        # Idempotency key pattern for downstream actions
+        triage["request_id"] = request_id
+        triage["action_idempotency_key"] = f"{ticket.get('ticket_id')}:{request_id}"
+
+        return triage
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Define deterministic “agent roles” as activities**  
+
+Even if you plan to do multi-agent, you want clear boundaries first. An activity is basically “one job” with a defined input and output. What can go wrong is you let one agent do everything and you cannot test any part of it.
+
+```python
+@activity.defn
+async def triage_activity(ticket: Dict[str, Any], request_id: str) -> Dict[str, Any]:
+    ...
+```
+
+**Step 2: Enforce input validation before anything expensive**  
+
+LLMs and APIs cost money and time. If the input is garbage, fail fast. What can go wrong is you accept huge payloads and now every request is slow.
+
+```python
+class TicketIn(BaseModel):
+    ticket_id: str = Field(min_length=1)
+    user_text: str = Field(min_length=10, max_length=settings.MAX_TEXT_CHARS)
+```
+
+**Step 3: Add safe prompting constraints so the model cannot wander**  
+
+In production, “the model will probably do the right thing” is not a plan. What can go wrong is it returns a paragraph instead of JSON and your system breaks.
+
+```python
+def safe_prompt(ticket: TicketIn) -> str:
+    rules = (
+        "Output JSON with keys: category, escalate, confidence, rationale.\n"
+    )
+    return f"{rules}\nTicket:\n{ticket.user_text}\n"
+```
+
+**Step 4: Wrap external calls with retries, backoff, and timeouts**  
+
+If you skip this, a small blip becomes a real outage. What can go wrong is your workers hang and queue up.
+
+```python
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
+)
+def call_llm(prompt: str) -> Dict[str, Any]:
+    ...
+```
+
+**Step 5: Add a simple evaluation hook that enforces policy**  
+
+This is the cheapest safety net you can build. What can go wrong is your model gradually starts under-escalating and users get angry.
+
+```python
+def eval_hook(triage: TriageOut) -> None:
+    if triage.confidence < 0.4 and not triage.escalate:
+        raise RuntimeError("Low confidence must escalate")
+```
+
+**Step 6: Return an idempotency key for downstream actions**  
+
+In multi step workflows, duplicates happen. What can go wrong is you create two tickets or send two emails.
+
+```python
+triage["action_idempotency_key"] = f"{ticket.get('ticket_id')}:{request_id}"
+```
+
+### Tool 2: OpenTelemetry
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+Now we add observability, because multi-agent without visibility is a headache. Even in the single agent case, you still want to know where time goes.  
+
+We will instrument the workflow steps, the LLM call, and any downstream calls like ticketing APIs.  
+
+We will attach a request id so logs and traces line up.  
+
+We will record metrics like LLM latency, retry counts, and escalation rate.  
+
+We will avoid logging full ticket text by default to reduce PII risk.  
+
+We will sample traces so you get enough signal without paying a fortune.  
+
+We will add tags like category and channel so you can break down behavior.  
+
+We will keep the instrumentation code small and consistent so it does not spread everywhere.  
+
+We will also keep a “test mode” where telemetry uses a console exporter so it works locally.  
+
+This is the boring part that makes your life easier later.  
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp opentelemetry-instrumentation-httpx
+
+# Minimal placeholder showing where to plug in telemetry.
+# In real deployments you configure OTLP endpoint via env vars and use sampling.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Create spans around each activity and each external call**  
+
+What can go wrong is you only measure total latency and have no clue if retrieval, LLM, or downstream action is slow.
+
+```python
+# with tracer.start_as_current_span("triage_activity") as span:
+#     span.set_attribute("ticket.channel", channel)
+#     ...
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- Start with a single orchestrator unless you have a real reason to split agents.
+- Split agents when responsibilities are clearly different and you need independent scaling or safety checks.
+- Use workflows and deterministic activities to make multi-agent behavior testable.
+- Observability is not optional once you have multiple components.
+
+### Common pitfalls
+
+- Adding multiple agents before you have a stable single-agent baseline.
+- No shared request id, so debugging becomes a scavenger hunt.
+- No timeouts and retries, so one slow call stalls the whole system.
+- No eval hooks, so regressions slip through quietly.
+
+### Next steps
+
+- Add a second activity that does knowledge lookup before triage to improve accuracy.
+- Add a human approval step for high-risk actions.
+- Add dashboards for escalation rate, retry rate, and latency percentiles.
+- Create a small labeled set of tickets and run it nightly as a regression test.

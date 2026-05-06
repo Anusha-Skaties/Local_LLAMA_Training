@@ -1,0 +1,179 @@
+Got it — I’ll fix that. From now on, the introduction will be **a single paragraph with 5 sentences**, not separate lines.
+
+Continuing with the next blogs:
+
+---
+
+# How do you evaluate LLM applications: metrics, benchmarks, and tools?
+
+Well, basically, evaluating an LLM system means checking whether the answers it produces are actually correct and useful. It exists because LLMs can sound confident even when they are wrong, so we need a way to measure quality. Unlike a normal chatbot, production systems cannot rely on manual checking and need automated evaluation. A simple way to think about it is like writing tests for your AI system. A common mistake beginners make is relying only on manual testing instead of building evaluation pipelines.
+
+---
+
+## Real-world example
+
+A common pattern in large companies is building evaluation pipelines alongside the AI system itself. Every query and response is logged with metadata like latency, source documents, and user feedback. Some companies use automated scoring methods where a smaller model evaluates whether the answer is correct or grounded. Others use human review pipelines for high-risk queries. These evaluations are stored and analyzed over time to detect performance degradation. Teams often create dashboards to monitor accuracy trends and failure cases. This helps them identify issues like hallucinations or incorrect retrieval. Feedback loops are then used to improve prompts, retrieval logic, or training data. Without this continuous evaluation, systems can silently fail in production. This is why evaluation is treated as a core component, not an afterthought.
+
+---
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**LangSmith**
+Good for tracing, debugging, and evaluating LLM workflows.
+Production friendly because it provides structured logs, traces, and monitoring tools.
+
+**Datadog**
+Used for tracking metrics like latency and error rates.
+Production friendly because it supports alerting and large-scale monitoring.
+
+---
+
+### Experimentation / prototyping options
+
+**Promptfoo**
+Good for testing prompt variations quickly.
+
+**Weights & Biases**
+Useful for tracking experiments and evaluation runs.
+
+---
+
+## Production Example using LangSmith + Datadog
+
+### Setup explanation
+
+We are going to build a simple evaluation and monitoring layer around an LLM system. Most tutorials stop at generating responses, but real systems need visibility into performance. We will log every request and response in a structured format so it can be analyzed later. We will also measure latency and detect slow responses. We will include retries for API failures and timeouts to prevent hanging requests. We will validate inputs before processing them. We will also create a simple evaluation function that checks response quality. This could later be replaced with more advanced scoring. We will use environment variables for API keys to keep things secure. We will design the system so it can easily plug into monitoring tools like Datadog. This setup reflects how real production systems are monitored and improved.
+
+---
+
+### Setup code
+
+```python
+# pip install openai python-dotenv tenacity
+
+import os
+import logging
+import time
+from dotenv import load_dotenv
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+```
+
+---
+
+## Step 1: Input validation
+
+We validate inputs early to avoid unnecessary API calls and failures.
+
+```python
+def validate(query: str):
+    if not query or len(query.strip()) < 3:
+        raise ValueError("Invalid query")
+```
+
+---
+
+## Step 2: LLM call with retry and timeout
+
+External APIs can fail, so we wrap them with retries.
+
+```python
+@retry(stop=stop_after_attempt(3))
+def call_llm(query: str):
+    start = time.time()
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": query}],
+        timeout=10
+    )
+    
+    latency = time.time() - start
+    return response.choices[0].message.content, latency
+```
+
+---
+
+## Step 3: Structured logging
+
+We log everything in a structured way for observability.
+
+```python
+def log_event(query, response, latency):
+    logger.info({
+        "query": query,
+        "response": response,
+        "latency": latency
+    })
+```
+
+---
+
+## Step 4: Evaluation function
+
+We add a simple evaluation hook.
+
+```python
+def evaluate(response: str):
+    if len(response) < 5:
+        return False
+    return True
+```
+
+---
+
+## Step 5: Full pipeline
+
+```python
+def run(query: str):
+    validate(query)
+    
+    response, latency = call_llm(query)
+    log_event(query, response, latency)
+    
+    score = evaluate(response)
+    logger.info({"evaluation_score": score})
+    
+    return response
+```
+
+---
+
+## Step 6: Test
+
+```python
+def test():
+    res = run("What is AI?")
+    assert res is not None
+```
+
+---
+
+## Wrap-up
+
+### Key takeaways
+
+* Evaluation is continuous, not one-time
+* Logging is critical for debugging
+* Metrics help track system health
+
+### Common pitfalls
+
+* No evaluation pipeline
+* Only manual testing
+* Ignoring latency
+
+### Next steps
+
+* Add automated scoring models
+* Build dashboards
+* Integrate alerts

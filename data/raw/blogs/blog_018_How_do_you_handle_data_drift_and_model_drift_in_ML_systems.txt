@@ -1,0 +1,8 @@
+How do you handle data drift and model drift in ML systems?
+
+Well, basically, data drift and model drift happen when the world changes and your model stops working as well as it used to. It exists because the data your model was trained on is a snapshot of the past, but real-world data is always moving. Unlike a normal software bug, drift is a silent issue because your code is still running fine, but the answers it gives are getting worse. A simple way to think about it is like a map becoming outdated as roads change. One common mistake beginners make is assuming a model is finished once it is deployed.
+
+Real-world example
+
+A strong real-world example is Uber. Their ETA prediction models depend heavily on traffic patterns. During the pandemic, traffic conditions changed dramatically, and their models started producing inaccurate predictions. This was a clear case of data drift. Uber detected the shift by monitoring input data patterns and quickly retrained their models using updated data. This allowed them to maintain accuracy and continue providing reliable ETAs to users.
+

@@ -1,0 +1,84 @@
+# How do you evaluate whether your problem even needs an LLM solution?
+
+Well, basically, this decision is about understanding whether an LLM is the right tool for your problem or if simpler approaches would work better. It exists because LLMs are powerful but also expensive and sometimes unnecessary. Unlike traditional systems, LLM-based solutions introduce uncertainty and cost. A simple way to think about it is choosing between a calculator and a human assistant. A common mistake beginners make is trying to use LLMs for problems that can be solved with simple rules or databases.
+
+## Real-world example
+
+A common pattern in large companies is evaluating whether automation problems require AI or not. For example, in customer support, simple queries like checking order status are handled using rule-based systems. Only complex queries that require understanding natural language are routed to LLMs. This hybrid approach reduces cost and improves reliability. Teams analyze query types and categorize them based on complexity. Over time, systems evolve to include both rule-based and AI components. This ensures efficient resource usage. Without this evaluation, companies often overspend on AI solutions. Choosing the right tool is critical for scalability.
+
+## What you can use to build this
+
+### Production-level options
+
+- OpenAI API: Used when natural language understanding is required. Production friendly because of scalability.
+- FastAPI: Used for building hybrid systems. Production friendly because of performance.
+
+### Experimentation options
+
+- Python: Good for prototyping logic.
+- Jupyter Notebook: Useful for testing ideas.
+
+## Production Example using FastAPI + OpenAI
+
+### Setup explanation
+
+We will build a system that decides whether to use an LLM or not. Many tutorials assume LLMs are always needed, but real systems are selective. We will include input validation. We will add logging to track decisions. We will include retries and timeouts. We will define rules for simple queries. We will route complex queries to the LLM. We will use environment variables for API keys. We will include evaluation hooks. This ensures cost-efficient and reliable systems.
+
+### Setup code
+
+# pip install fastapi openai python-dotenv
+
+import os
+import logging
+from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+## Step 1: Rule-based check
+
+def is_simple(query):
+    return "status" in query.lower()
+
+## Step 2: LLM call
+
+def call_llm(query):
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"user","content":query}],
+        timeout=10
+    )
+    return res.choices[0].message.content
+
+## Step 3: Routing
+
+def run(query):
+    if is_simple(query):
+        return "Handled by rule-based system"
+    return call_llm(query)
+
+## Step 4: Evaluation
+
+def test():
+    assert run("order status") is not None
+
+## Wrap-up
+
+Key takeaways
+- Not every problem needs an LLM
+- Hybrid systems are effective
+- Cost matters
+
+Common pitfalls
+- Overusing LLMs
+- Ignoring simpler solutions
+- No routing logic
+
+Next steps
+- Improve classification
+- Add monitoring
+- Optimize costs

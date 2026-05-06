@@ -1,0 +1,301 @@
+# How do you decide between cloud-based AI services and self-hosted models?
+
+Well, basically, an agent system is an LLM plus tools plus guardrails so you can run real workflows, not just chat. They exist because you need reliability, cost control, and safety when you put AI in front of users. What makes them different from a normal chatbot is the operational layer: timeouts, retries, logging, policy checks, and approvals. A simple mental model is renting a fully managed kitchen versus cooking at home, both can make dinner, but the tradeoffs are real. A common beginner mistake is self-hosting to “save money” without accounting for engineering time and GPU ops costs.
+
+
+
+
+
+
+
+## Real-world example
+
+Spotify is a reasonable company to mention because it is publicly known for personalization and large scale ML usage, and they have strong infrastructure needs. In a Spotify style workflow, some AI features might be fine using cloud services if you want fast iteration, like prototyping a user-facing summarization feature. But if you have strict latency requirements at scale, or you want control over model upgrades, self-hosting can become attractive. They also have to think about data handling, because user listening behavior is sensitive. Cloud services can provide strong security features, but you still have to trust the vendor and set policies correctly. Self-hosting can reduce vendor dependency and can offer predictable costs at very high volume, but only if you operate it well. The real decision is often phased: start managed, prove value, then self-host for cost or control when it becomes worth it.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**AWS Bedrock**  
+
+Good at using managed foundation models with enterprise security controls and integrated governance.  
+
+Production-friendly because it supports IAM based access, managed infrastructure, and standardized auditing patterns.
+
+**Kubernetes**  
+
+Good at running self-hosted inference services and scaling them independently.  
+
+Production-friendly because it supports health checks, autoscaling, isolation, and rollouts.
+
+**vLLM**  
+
+Good at serving open weight models efficiently with batching and high throughput.  
+
+Production-friendly because it is designed for stable inference and performance under load.
+
+**OpenTelemetry**  
+
+Good at tracing and measuring both cloud calls and self-hosted inference consistently.  
+
+Production-friendly because it standardizes observability across systems.
+
+### Experimentation / prototyping options
+
+**Ollama**  
+
+Good for quickly running local models to test prompts and flows.  
+
+Great for prototyping because it is quick to set up and easy to swap models.
+
+**Docker Compose**  
+
+Good for local multi-service experiments like “API + model + database.”  
+
+Great for prototyping because it mimics production shape without full orchestration.
+
+**Gradio**  
+
+Good for interactive demos.  
+
+Great for prototyping because it helps you get feedback fast.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: AWS Bedrock
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We will build a sales lead enrichment + email drafting workflow with approvals, because it is a classic “cloud AI service” use case.  
+
+We will call a managed model to draft an email, but we will not send it automatically, we will require approval. That is a real production safety pattern.  
+
+We will install `boto3` to call AWS, `pydantic` for validation, and `python-json-logger` for structured logs.  
+
+We will rely on env vars and AWS credentials configuration, not hardcoded keys.  
+
+We will add retries and timeouts around the model call.  
+
+We will add a strict prompt that bans invented facts and bans claims like “I saw you using X” unless you have evidence.  
+
+We will add redaction for logs so we do not log full lead notes.  
+
+We will add an evaluation hook that checks the email is under a word limit and includes a clear CTA.  
+
+We will add a telemetry hook placeholder for traces and metrics.  
+
+We will add a fallback template if the model call fails so your sales team is not blocked.  
+
+Production features included: env var config, IAM based auth, structured logs, request ids, timeouts, retries/backoff, fallback templates, validation, safe prompting constraints, evaluation hook, redaction, and observability hook.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install fastapi uvicorn boto3 pydantic pydantic-settings tenacity python-json-logger
+
+import os
+import time
+import uuid
+import logging
+from typing import Optional
+
+import boto3
+from botocore.config import Config as BotoConfig
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+from tenacity import retry, stop_after_attempt, wait_exponential
+from pythonjsonlogger import jsonlogger
+
+class Settings(BaseSettings):
+    AWS_REGION: str = Field(default="us-east-1")
+    BEDROCK_MODEL_ID: str = Field(default="replace-me")
+    READ_TIMEOUT_S: int = Field(default=10)
+
+settings = Settings()
+
+logger = logging.getLogger("cloud_vs_self")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s %(request_id)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+app = FastAPI(title="Cloud vs Self-host Decision Demo")
+
+boto_cfg = BotoConfig(connect_timeout=2, read_timeout=settings.READ_TIMEOUT_S, retries={"max_attempts": 3})
+bedrock = boto3.client("bedrock-runtime", region_name=settings.AWS_REGION, config=boto_cfg)
+
+class DraftReq(BaseModel):
+    company: str = Field(min_length=2, max_length=100)
+    contact_role: str = Field(min_length=2, max_length=100)
+    product: str = Field(min_length=2, max_length=100)
+    evidence: str = Field(default="", max_length=500)  # only facts you actually know
+    notes: str = Field(default="", max_length=800)
+
+class DraftResp(BaseModel):
+    request_id: str
+    draft: str
+    needs_approval: bool
+    latency_ms: int
+
+def prompt(req: DraftReq) -> str:
+    rules = (
+        "Draft a short sales email.\n"
+        "Rules:\n"
+        "1) Do not invent facts.\n"
+        "2) Only use evidence provided.\n"
+        "3) Keep it under 160 words.\n"
+        "4) Include one clear next step.\n"
+        "5) Output plain text.\n"
+    )
+    return (
+        f"{rules}\n"
+        f"Company: {req.company}\n"
+        f"Role: {req.contact_role}\n"
+        f"Product: {req.product}\n"
+        f"Evidence: {req.evidence}\n"
+        f"Notes: {req.notes}\n"
+    )
+
+def fallback_template(req: DraftReq) -> str:
+    return (
+        f"Hi there, I work with teams like {req.company}.\n"
+        f"If improving {req.product} is a priority this quarter, I can share a quick overview.\n"
+        "Would a 15 minute call next week be useful?\n"
+    )
+
+def eval_hook(text: str) -> None:
+    if len(text.split()) > 170:
+        raise RuntimeError("Draft too long")
+    if "Would you" not in text and "Can we" not in text:
+        raise RuntimeError("Missing CTA")
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0))
+def call_bedrock(text: str) -> str:
+    # Placeholder. Actual body depends on the chosen model.
+    body = {"prompt": text}
+    resp = bedrock.invoke_model(modelId=settings.BEDROCK_MODEL_ID, body=str(body).encode("utf-8"))
+    raw = resp["body"].read().decode("utf-8")
+    return raw[:2000]
+
+@app.post("/draft", response_model=DraftResp)
+def draft(req: DraftReq, x_request_id: Optional[str] = Header(default=None)):
+    request_id = x_request_id or str(uuid.uuid4())
+    start = time.time()
+
+    logger.info("draft_req", extra={"request_id": request_id, "company": req.company})
+
+    try:
+        out = call_bedrock(prompt(req))
+    except Exception as e:
+        logger.warning("cloud_call_failed_fallback", extra={"request_id": request_id, "error": str(e)})
+        out = fallback_template(req)
+
+    eval_hook(out)
+
+    latency_ms = int((time.time() - start) * 1000)
+    logger.info("draft_done", extra={"request_id": request_id, "latency_ms": latency_ms})
+
+    # Observability hook: metrics/traces go here
+    return DraftResp(request_id=request_id, draft=out, needs_approval=True, latency_ms=latency_ms)
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Require approval for outbound messages**  
+
+What can go wrong is an LLM sends something incorrect or awkward to a real customer.
+
+```python
+return DraftResp(..., needs_approval=True, ...)
+```
+
+**Step 2: Use evidence-based prompting**  
+
+What can go wrong is the model invents “facts” about the company.
+
+```python
+"Only use evidence provided.\n"
+```
+
+**Step 3: Add fallback so work continues during outages**  
+
+What can go wrong is the cloud service has a brownout and your team is blocked.
+
+```python
+out = fallback_template(req)
+```
+
+**Step 4: Add an evaluation hook to enforce basic quality rules**  
+
+What can go wrong is drafts get too long or miss a CTA and performance drops.
+
+```python
+def eval_hook(text: str) -> None:
+    ...
+```
+
+### Tool 2: vLLM
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+Now the self-hosted path. The idea is the same API, but you call your own model server.  
+
+We will use vLLM because it is a common choice for efficient serving of open weight models.  
+
+We will install `httpx` for HTTP calls with timeouts, `tenacity` for retries, and `pydantic` for validation.  
+
+We will use env vars for the model endpoint and model name.  
+
+We will add structured logs and request ids.  
+
+We will add concurrency limits so you do not overload your GPU server.  
+
+We will add a simple circuit breaker behavior: if the model backend is failing, fall back to a template.  
+
+We will add safe prompting constraints and strict output parsing.  
+
+We will add an evaluation hook similar to the cloud path so quality checks are consistent.  
+
+We will add telemetry hooks so you can compare cloud vs self-hosted fairly.  
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install httpx tenacity pydantic python-json-logger
+# This is the same idea as a cloud call, but the base URL is your own vLLM service.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Keep the interface identical**  
+
+What can go wrong is you couple the whole app to one vendor or one serving stack.
+
+```python
+# call_model(prompt) -> text
+# same for cloud or self-hosted
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- Cloud services are great for speed, managed ops, and quick iteration.
+- Self-hosting is great for control, customization, and sometimes cost at high scale, but you own reliability.
+- The best decision is often staged: start cloud, then self-host where it truly pays off.
+- Use the same evaluation hooks and telemetry so comparisons are fair.
+
+### Common pitfalls
+
+- Self-hosting without a plan for GPUs, scaling, and incident response.
+- Cloud usage without cost controls and fallbacks.
+- No approval gates for outbound actions.
+- No observability, so you cannot debug or compare systems.
+
+### Next steps
+
+- Add cost tracking per request for both modes.
+- Add a small regression eval suite that runs daily.
+- Add a canary release process so you can roll out model changes safely.
+- Implement caching for repeated prompts to reduce latency and cost.

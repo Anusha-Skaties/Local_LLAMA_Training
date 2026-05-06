@@ -1,0 +1,152 @@
+---
+
+# How do you implement tool calling and function calling in LLMs (deep dive)?
+
+Well, basically, tool calling means letting an LLM decide when to use external functions instead of answering everything itself. It exists because models alone cannot access real-time data or perform actions like creating tickets or querying databases. Unlike a normal chatbot, a tool-enabled system can take actions and interact with real systems. A simple way to think about it is like giving the AI access to APIs and letting it decide when to use them. A common mistake beginners make is not defining clear tool interfaces, which leads to unpredictable behavior.
+
+---
+
+## Real-world example
+
+A common pattern in large companies is using tool calling for customer support automation. When a user asks about account issues, the system does not guess the answer. Instead, the LLM decides to call a function that fetches account details from a database. If the issue requires escalation, it calls another tool to create a support ticket. This ensures that sensitive operations are handled through controlled APIs rather than generated text. The system logs each tool call for auditing. Over time, teams refine tool definitions to improve accuracy. This approach reduces hallucination because the model relies on real data. It also makes the system safer and more predictable. Tool calling is now a core part of production AI systems.
+
+---
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**OpenAI API**
+Supports structured function calling with JSON schemas.
+Production friendly because of reliability and clear tool interfaces.
+
+**LangChain**
+Helps orchestrate tools and manage execution flow.
+Production friendly because of modular design and ecosystem.
+
+---
+
+### Experimentation / prototyping options
+
+**AutoGen**
+Useful for experimenting with tool usage in agents.
+
+**CrewAI**
+Simple framework for prototyping tool-driven agents.
+
+---
+
+## Production Example using OpenAI + LangChain
+
+### Setup explanation
+
+We will build a system where the model decides when to call tools. Many tutorials show basic function calling, but we will include production considerations. We will define strict schemas so tool inputs are predictable. We will validate inputs before executing tools. We will add retries for API calls and timeouts for safety. We will log all tool calls for debugging. We will use environment variables for API keys. We will also design prompts carefully so the model knows when to use tools. We will include error handling so failures do not break the system. We will structure the pipeline so each step is clear. This makes the system reliable and maintainable.
+
+---
+
+### Setup code
+
+```python id="tc1"
+# pip install openai python-dotenv tenacity
+
+import os
+import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+```
+
+---
+
+## Step 1: Define tool interface
+
+We define clear input and output schema.
+
+```python id="tc2"
+def get_user_account(user_id: str):
+    if not user_id:
+        raise ValueError("Invalid user_id")
+    return {"status": "active", "user_id": user_id}
+```
+
+---
+
+## Step 2: Call LLM with tool schema
+
+```python id="tc3"
+@retry(stop=stop_after_attempt(3))
+def call_llm(query):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"user","content":query}],
+        timeout=10
+    )
+    return response
+```
+
+---
+
+## Step 3: Tool execution logic
+
+```python id="tc4"
+def execute_tool(name, args):
+    if name == "get_user_account":
+        return get_user_account(**args)
+    raise ValueError("Unknown tool")
+```
+
+---
+
+## Step 4: Pipeline
+
+```python id="tc5"
+def run(query):
+    response = call_llm(query)
+    
+    if hasattr(response, "tool_calls") and response.tool_calls:
+        for tool in response.tool_calls:
+            result = execute_tool(tool.name, tool.args)
+            logger.info({"tool": tool.name, "result": result})
+            return result
+    
+    return response.choices[0].message.content
+```
+
+---
+
+## Step 5: Evaluation
+
+```python id="tc6"
+def test():
+    res = run("Get account for user 123")
+    assert res is not None
+```
+
+---
+
+## Wrap-up
+
+### Key takeaways
+
+* Tool calling connects AI to real systems
+* Clear schemas are critical
+* Logging improves reliability
+
+### Common pitfalls
+
+* Poor tool definitions
+* No validation
+* No error handling
+
+### Next steps
+
+* Add multiple tools
+* Add routing logic
+* Add monitoring

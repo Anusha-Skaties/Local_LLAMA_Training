@@ -1,0 +1,14 @@
+# How do you choose between different orchestration frameworks like LangGraph vs LangChain?
+
+Well, basically, choosing an orchestration framework is about deciding how much control you need over the steps your AI takes to finish a job. It exists because as soon as you want an AI to do more than just answer a question, you need a map to guide it. Unlike a simple chatbot, these frameworks allow you to build complex workflows with branches and loops. A simple way to think about it is that LangChain is linear while LangGraph supports loops and state. One common beginner mistake is picking the most complex framework for a simple task.
+
+## Real-world example
+
+Replit uses graph based orchestration to allow AI to write, test, and fix code iteratively.
+
+## Wrap-up
+
+Key takeaways
+- LangChain is simple
+- LangGraph is flexible
+- Choose based on complexity

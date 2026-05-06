@@ -1,0 +1,328 @@
+# How do you decide between RAG and fine-tuning for your application?
+
+Well, basically, an agent system is when an LLM can follow a workflow, use tools, and make controlled decisions instead of only replying in chat. They exist because a lot of useful AI work is “look things up, apply rules, and produce an answer,” not pure freeform text. They’re different from a normal chatbot because they can fetch data, verify it, and route tasks, not just talk. A simple mental model is a librarian plus a writer: first find the right book (RAG), then write a clear answer. A common beginner mistake is fine-tuning to “add knowledge” when the real need was just better retrieval and grounding.
+
+
+
+
+
+
+
+## Real-world example
+
+GitHub Copilot is a clear public example of an AI product that benefits from retrieval style behavior, because it needs to be aware of the developer’s current code and context. In a Copilot like workflow, RAG is a natural fit when the user’s local repository is the source of truth. If you fine-tune for that, you risk baking in outdated patterns and you still won’t know the user’s current codebase. Retrieval lets you pull relevant files, symbols, and docs at request time and keep the answer grounded. Fine-tuning still matters for behavior, like code style, formatting, or internal conventions, but it’s usually not the first lever for “knowledge.” The deciding factor is often update frequency: if facts change daily, retrieval wins. If you need consistent style and domain behavior, fine-tuning can help.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**Elasticsearch**  
+
+Good at scalable text search, filtering, and hybrid keyword workflows when you need control.  
+
+Production-friendly because it’s mature, operationally well understood, and supports security and scaling.
+
+**PostgreSQL (with pgvector)**  
+
+Good at keeping vectors near your source data and doing similarity search with strong transactional guarantees.  
+
+Production-friendly because Postgres is stable, observable, and widely operated.
+
+**OpenTelemetry**  
+
+Good at tracing RAG pipelines end-to-end so you can debug slow retrieval or bad answers.  
+
+Production-friendly because it standardizes metrics and traces across services.
+
+**Kubernetes**  
+
+Good at running the retrieval service, embedder workers, and API reliably.  
+
+Production-friendly because of autoscaling, rollout safety, and health checks.
+
+### Experimentation / prototyping options
+
+**FAISS**  
+
+Good for local vector search experiments when you don’t need a full database.  
+
+Great for prototyping because it’s fast and easy to run on a laptop.
+
+**Chroma**  
+
+Good for quick RAG demos and small projects.  
+
+Great for prototyping because setup is simple and iteration is quick.
+
+**LangChain**  
+
+Good for quickly assembling RAG chains and trying prompt patterns.  
+
+Great for prototyping because it saves glue code while you learn.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: PostgreSQL (pgvector)
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We’ll build a compliance Q&A system with citations and refusal rules. That’s a good stress test, because it forces you to be grounded and careful.  
+
+We’ll store documents in Postgres, plus an embedding vector column using pgvector.  
+
+We’ll use `psycopg` to talk to Postgres, `pydantic` for validation, and `tenacity` for retries.  
+
+We’ll use env vars for DB URLs and any API keys.  
+
+We’ll use structured logging and request IDs.  
+
+We’ll enforce timeouts on DB operations so we don’t deadlock the app under load.  
+
+We’ll implement basic chunking rules and metadata so citations are real, not vibes.  
+
+We’ll add caching for repeated questions.  
+
+We’ll add an eval hook that checks whether the output includes at least one citation when it claims facts.  
+
+Production features included: env config, migrations hook placeholder, retries, timeouts, structured logs, request IDs, validation, caching, circuit breaker fallback, safe prompting, evaluation hook, and observability hook.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install fastapi uvicorn psycopg[binary] pydantic pydantic-settings tenacity python-json-logger
+
+import os
+import time
+import uuid
+import json
+import logging
+from typing import List, Dict, Any, Optional, Tuple
+
+import psycopg
+from psycopg.rows import dict_row
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from pythonjsonlogger import jsonlogger
+
+class Settings(BaseSettings):
+    DATABASE_URL: str = Field(default="postgresql://postgres:postgres@localhost:5432/rag")
+    DB_STATEMENT_TIMEOUT_MS: int = Field(default=2000)
+    MAX_QUERY_CHARS: int = Field(default=2000)
+    TOP_K: int = Field(default=5)
+
+settings = Settings()
+
+logger = logging.getLogger("rag_service")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s %(request_id)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+app = FastAPI(title="RAG vs Fine-tune Demo (RAG path)")
+
+class AskRequest(BaseModel):
+    question: str = Field(min_length=5)
+    policy: str = Field(default="compliance")
+
+class Citation(BaseModel):
+    doc_id: str
+    chunk_id: str
+    snippet: str
+
+class AskResponse(BaseModel):
+    request_id: str
+    answer: str
+    citations: List[Citation]
+    latency_ms: int
+
+def db_connect():
+    conn = psycopg.connect(settings.DATABASE_URL, row_factory=dict_row)
+    with conn.cursor() as cur:
+        cur.execute(f"SET statement_timeout = {settings.DB_STATEMENT_TIMEOUT_MS}")
+    return conn
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0),
+    retry=retry_if_exception_type(psycopg.OperationalError),
+)
+def retrieve_chunks(question: str) -> List[Dict[str, Any]]:
+    # Placeholder retrieval: in a real system you'd embed the question and do vector search.
+    # Here we just do keyword search so the code is runnable without an embedder dependency.
+    q = question[: settings.MAX_QUERY_CHARS]
+    conn = db_connect()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT doc_id, chunk_id, chunk_text
+                FROM chunks
+                WHERE chunk_text ILIKE '%' || %s || '%'
+                LIMIT %s
+                """,
+                (q.split()[0], settings.TOP_K),
+            )
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+def safe_answer(question: str, retrieved: List[Dict[str, Any]]) -> Tuple[str, List[Citation]]:
+    # Safe prompting constraints without calling a real LLM in this minimal runnable example.
+    # In production you'd call an LLM and force it to only use retrieved text.
+    if "how to break" in question.lower():
+        raise HTTPException(status_code=400, detail="Refused: harmful request")
+
+    citations: List[Citation] = []
+    for r in retrieved:
+        snippet = r["chunk_text"][:200].replace("\n", " ")
+        citations.append(Citation(doc_id=r["doc_id"], chunk_id=r["chunk_id"], snippet=snippet))
+
+    if not citations:
+        answer = "I do not have enough grounded context to answer that confidently."
+    else:
+        answer = "Based on the retrieved policy text, here is a grounded summary you can check against the citations."
+
+    return answer, citations
+
+def eval_hook(answer: str, citations: List[Citation]) -> None:
+    # Minimal eval rule: if answer claims it's based on retrieved text, require citations
+    if "Based on the retrieved" in answer and len(citations) == 0:
+        raise RuntimeError("Eval failed: missing citations")
+
+@app.post("/ask", response_model=AskResponse)
+def ask(req: AskRequest, x_request_id: Optional[str] = Header(default=None)):
+    request_id = x_request_id or str(uuid.uuid4())
+    start = time.time()
+
+    if len(req.question) > settings.MAX_QUERY_CHARS:
+        raise HTTPException(status_code=413, detail="Question too long")
+
+    logger.info("ask_received", extra={"request_id": request_id, "policy": req.policy})
+
+    retrieved = retrieve_chunks(req.question)
+    answer, citations = safe_answer(req.question, retrieved)
+
+    eval_hook(answer, citations)
+
+    latency_ms = int((time.time() - start) * 1000)
+    logger.info("ask_succeeded", extra={"request_id": request_id, "latency_ms": latency_ms, "citations": len(citations)})
+
+    # Observability hook: emit metrics/traces here
+    return AskResponse(request_id=request_id, answer=answer, citations=citations, latency_ms=latency_ms)
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Retrieval first, not generation first**  
+
+RAG is about grounding. If you generate first, you’re guessing.
+
+```python
+retrieved = retrieve_chunks(req.question)
+```
+
+**Step 2: Bound DB work with timeouts and retries**  
+
+Databases fail too. Timeouts keep your service alive.
+
+```python
+cur.execute(f"SET statement_timeout = {settings.DB_STATEMENT_TIMEOUT_MS}")
+```
+
+**Step 3: Enforce a grounded answer format**  
+
+Even if you use an LLM, you still enforce structure: answer plus citations.
+
+```python
+class AskResponse(BaseModel):
+    answer: str
+    citations: List[Citation]
+```
+
+**Step 4: Add refusal rules**  
+
+Compliance systems need clear red lines.
+
+```python
+if "how to break" in question.lower():
+    raise HTTPException(status_code=400, detail="Refused: harmful request")
+```
+
+**Step 5: Minimal evaluation hook**  
+
+Catch broken pipelines.
+
+```python
+def eval_hook(answer: str, citations: List[Citation]) -> None:
+    ...
+```
+
+### Tool 2: OpenTelemetry
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+RAG systems fail in sneaky ways: retrieval is slow, embeddings drift, the DB is fine but the LLM call is timing out. OpenTelemetry helps you see that clearly.  
+
+We’ll instrument key spans: request received, retrieval, generation, and response.  
+
+We’ll attach the request ID to logs and traces.  
+
+We’ll record metrics like retrieval latency, number of chunks, and refusal count.  
+
+We’ll keep PII out of traces by default and log only hashes or truncated text.  
+
+We’ll sample traces so you don’t drown in data.  
+
+We’ll add explicit attributes like `top_k` and `policy`.  
+
+And we’ll make it easy to swap exporters later.  
+
+This is exactly the “boring but important” layer most tutorials skip.  
+
+It makes debugging 10x easier when something is off.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install opentelemetry-api opentelemetry-sdk opentelemetry-instrumentation-fastapi
+
+# This is intentionally a minimal placeholder showing where OTEL fits.
+# In production you configure exporters (OTLP, Jaeger, etc.) and sampling.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Trace the retrieval step**  
+
+If retrieval is slow, the whole app is slow.
+
+```python
+# with tracer.start_as_current_span("retrieve_chunks") as span:
+#     span.set_attribute("top_k", settings.TOP_K)
+#     retrieved = retrieve_chunks(question)
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- Use RAG when knowledge changes often or needs citations and grounding.
+- Fine-tuning is better for behavior, style, format consistency, and domain phrasing, not for “fresh facts.”
+- Production RAG is mostly: good chunking, good metadata, good evals, and good observability.
+- If you can’t cite it, you should be careful claiming it.
+
+### Common pitfalls
+
+- Fine-tuning to add knowledge that should be retrieved.
+- No document IDs or chunk IDs, so citations are fake.
+- No timeouts on retrieval, so latency spikes become outages.
+- No evals, so quality drifts quietly.
+
+### Next steps
+
+- Add a real embedding step and vector similarity search.
+- Add a red team set for refusal rules.
+- Add an offline eval suite for answer groundedness.
+- Add monitoring for top queries and “no context found” rates.

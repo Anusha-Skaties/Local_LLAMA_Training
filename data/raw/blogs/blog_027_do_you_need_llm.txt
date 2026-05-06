@@ -1,0 +1,319 @@
+# How do you evaluate whether your problem even needs an LLM solution?
+
+Well, basically, an agent system is a way to use an LLM inside a controlled workflow where it can follow steps and call tools. They exist because some problems need flexible language understanding, and normal code rules get too brittle. What makes them different from a normal chatbot is they are built to do work reliably, not just talk. A simple mental model is asking “do I need a calculator or do I need a human tutor,” because not every problem needs the fancy option. A common beginner mistake is using an LLM for tasks that are really just lookup, rules, or simple templates.
+
+
+
+
+
+
+
+## Real-world example
+
+Grammarly is a good example because it is publicly known for writing assistance, and language tasks are naturally a good fit for LLMs. In Grammarly’s core workflow, the value is rewriting, tone adjustment, and suggesting clearer phrasing, which is exactly where deterministic rules struggle. They can still use rules for things like obvious spelling patterns, but the harder part is style and context, which is more probabilistic. The key is that the user expects variability and suggestions, not a single “correct” answer like a tax calculation. Also, the UI is built around reviewing and accepting changes, which reduces risk. If your product cannot tolerate occasional weird output, you need to be more careful. Grammarly style products justify LLM use because language quality is the product. For many internal business apps, the LLM is optional and a smaller rules based system might be safer.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**FastAPI**  
+
+Good at building a simple, reliable API layer for either LLM or non-LLM pipelines.  
+
+Production-friendly because it supports validation, performance, and standard deployment patterns.
+
+**PostgreSQL**  
+
+Good at storing requests, outcomes, labels, and evaluation datasets.  
+
+Production-friendly because it is mature, secure, and widely monitored.
+
+**OpenTelemetry**  
+
+Good at capturing latency and error rates so you can compare LLM vs non-LLM approaches honestly.  
+
+Production-friendly because it standardizes metrics and tracing.
+
+**Kubernetes**  
+
+Good at deploying and scaling the system consistently across environments.  
+
+Production-friendly because it supports reliability, autoscaling, and controlled rollouts.
+
+### Experimentation / prototyping options
+
+**Jupyter Notebook**  
+
+Good for trying a baseline rules approach and a quick LLM approach side by side.  
+
+Great for prototyping because you can iterate quickly and inspect failures.
+
+**spaCy**  
+
+Good for classic NLP baselines like keyword extraction, NER, and simple classification.  
+
+Great for prototyping because it is fast and works offline.
+
+**scikit-learn**  
+
+Good for building simple baselines like logistic regression classifiers.  
+
+Great for prototyping because it is easy to train and evaluate quickly.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: FastAPI
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We are going to build a small service that can run in two modes: a simple pipeline mode and an LLM mode. That makes the decision real, because you can compare them.  
+
+We will implement an internal IT ticket routing + automation use case. This is great because a lot of it can be solved with rules and a small classifier, and you can measure where the LLM actually helps.  
+
+We will install `fastapi` and `uvicorn` to run the API, `pydantic` for validation, `httpx` for calling an LLM endpoint with timeouts, and `tenacity` for retries.  
+
+We will use env vars for secrets and endpoints.  
+
+We will add structured logging with a request id.  
+
+We will add strict timeouts for external calls so the API stays responsive.  
+
+We will add input size limits to avoid abuse.  
+
+We will add a basic evaluation hook that compares the chosen route to an optional “expected_route” label when provided.  
+
+We will add safe prompting constraints in the LLM mode.  
+
+We will leave a telemetry hook for OpenTelemetry and keep it obvious where to add metrics.  
+
+Production features included: env var config, validation, structured logs, request ids, timeouts, retries/backoff, fallbacks, rate limiting stub, caching stub, evaluation hook, safe prompting constraints, and observability hook.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install fastapi uvicorn pydantic pydantic-settings httpx tenacity python-json-logger
+
+import os
+import time
+import uuid
+import logging
+from typing import Optional, Literal, Dict, Any
+
+import httpx
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from pythonjsonlogger import jsonlogger
+
+class Settings(BaseSettings):
+    MODE: Literal["rules", "llm"] = "rules"
+    LLM_URL: str = "http://localhost:8001/classify"
+    LLM_TIMEOUT_S: float = 6.0
+    MAX_TEXT_CHARS: int = 3000
+
+settings = Settings()
+
+logger = logging.getLogger("needs_llm")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s %(request_id)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+app = FastAPI(title="Do we need an LLM?")
+
+class RouteRequest(BaseModel):
+    subject: str = Field(min_length=3, max_length=200)
+    body: str = Field(min_length=10, max_length=settings.MAX_TEXT_CHARS)
+    expected_route: Optional[Literal["it_helpdesk", "security", "network"]] = None
+
+class RouteResponse(BaseModel):
+    request_id: str
+    mode: str
+    route: str
+    confidence: float
+    latency_ms: int
+    eval_passed: Optional[bool] = None
+
+def rules_route(subject: str, body: str) -> Dict[str, Any]:
+    text = (subject + " " + body).lower()
+    if "phish" in text or "malware" in text:
+        return {"route": "security", "confidence": 0.9}
+    if "wifi" in text or "vpn" in text:
+        return {"route": "network", "confidence": 0.7}
+    return {"route": "it_helpdesk", "confidence": 0.6}
+
+def safe_prompt(subject: str, body: str) -> str:
+    rules = (
+        "Classify the IT ticket.\n"
+        "Allowed routes: it_helpdesk, security, network.\n"
+        "If unsure, choose it_helpdesk and set confidence low.\n"
+        "Output JSON with keys: route, confidence.\n"
+    )
+    return f"{rules}\nSubject: {subject}\nBody: {body}\n"
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0),
+    retry=retry_if_exception_type((httpx.TimeoutException, httpx.NetworkError)),
+)
+def llm_route(subject: str, body: str) -> Dict[str, Any]:
+    payload = {"prompt": safe_prompt(subject, body)}
+    with httpx.Client(timeout=settings.LLM_TIMEOUT_S) as client:
+        r = client.post(settings.LLM_URL, json=payload)
+        r.raise_for_status()
+        data = r.json()
+        return data
+
+def eval_hook(pred_route: str, expected_route: Optional[str]) -> Optional[bool]:
+    if expected_route is None:
+        return None
+    return pred_route == expected_route
+
+@app.post("/route", response_model=RouteResponse)
+def route(req: RouteRequest, x_request_id: Optional[str] = Header(default=None)):
+    request_id = x_request_id or str(uuid.uuid4())
+    start = time.time()
+
+    logger.info("route_received", extra={"request_id": request_id, "mode": settings.MODE})
+
+    if settings.MODE == "rules":
+        out = rules_route(req.subject, req.body)
+    else:
+        try:
+            out = llm_route(req.subject, req.body)
+        except Exception as e:
+            # Fallback to rules mode if LLM fails
+            logger.warning("llm_failed_fallback_rules", extra={"request_id": request_id, "error": str(e)})
+            out = rules_route(req.subject, req.body)
+
+    latency_ms = int((time.time() - start) * 1000)
+    passed = eval_hook(out["route"], req.expected_route)
+
+    logger.info(
+        "route_done",
+        extra={"request_id": request_id, "route": out["route"], "confidence": out["confidence"], "eval_passed": passed},
+    )
+
+    # Observability hook: metrics/traces go here
+    return RouteResponse(
+        request_id=request_id,
+        mode=settings.MODE,
+        route=out["route"],
+        confidence=float(out["confidence"]),
+        latency_ms=latency_ms,
+        eval_passed=passed,
+    )
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Start with a baseline that does not use an LLM**  
+
+This is how you avoid “LLM because it is cool” decisions. What can go wrong is you never learn the real requirements and you overspend.
+
+```python
+def rules_route(subject: str, body: str) -> Dict[str, Any]:
+    ...
+```
+
+**Step 2: Add an LLM mode behind the same interface**  
+
+If the API contract is the same, you can compare outcomes. What can go wrong is you build two totally different systems that cannot be compared.
+
+```python
+if settings.MODE == "rules":
+    out = rules_route(...)
+else:
+    out = llm_route(...)
+```
+
+**Step 3: Use safe prompting constraints and strict output format**  
+
+If you do not enforce format, you get random text and you cannot parse it. What can go wrong is a tiny prompt change breaks production.
+
+```python
+"Output JSON with keys: route, confidence.\n"
+```
+
+**Step 4: Add retries, timeouts, and fallback**  
+
+If the LLM endpoint has issues, you still want routing to work. What can go wrong is your whole support operation stalls.
+
+```python
+except Exception as e:
+    out = rules_route(req.subject, req.body)
+```
+
+**Step 5: Add a simple evaluation hook**  
+
+Even a basic labeled check helps you see if LLM adds value. What can go wrong is you think it helps because the outputs sound smarter.
+
+```python
+def eval_hook(pred_route: str, expected_route: Optional[str]) -> Optional[bool]:
+    ...
+```
+
+### Tool 2: PostgreSQL
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+To decide if you need an LLM, you need data, not vibes. PostgreSQL is where we store requests, labels, and results so we can measure.  
+
+We will store the input, the route chosen, the confidence, latency, and whether the label matched.  
+
+We will keep PII minimal and store hashes when possible.  
+
+We will add an index on timestamps so we can do time-based analysis.  
+
+We will add a way to mark “bad outcomes” so humans can label them later.  
+
+We will keep the schema simple because you will change it a lot early.  
+
+We will add statement timeouts to avoid slow queries.  
+
+We will add connection pooling in a real deployment.  
+
+We will use env vars for DB URL.  
+
+Then we can compare the rules baseline vs LLM mode honestly.  
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install psycopg[binary]
+# In a full service you'd insert a row after each request to track outcomes over time.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Log outcomes for offline analysis**  
+
+Without storage, you cannot improve anything.
+
+```python
+# INSERT INTO route_logs (request_id, mode, route, confidence, latency_ms, eval_passed, created_at) VALUES (...)
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- Build a non-LLM baseline first, even if it is simple.
+- Use an LLM only when flexibility in language understanding is actually needed.
+- Compare modes using real labels and real failure cases.
+- Add fallbacks so the system keeps working when the LLM is down.
+
+### Common pitfalls
+
+- Skipping the baseline and never knowing if the LLM helps.
+- No timeouts and retries, so one slow call breaks the API.
+- No format constraints, so outputs are hard to parse.
+- Logging sensitive data without thinking.
+
+### Next steps
+
+- Collect a labeled dataset of the top ticket types.
+- Track cost per request and latency percentiles by mode.
+- Add a “human review” queue for low confidence routes.
+- Gradually expand from rules to LLM only for the cases that need it.

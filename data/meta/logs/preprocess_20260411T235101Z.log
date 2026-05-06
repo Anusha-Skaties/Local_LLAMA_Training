@@ -1,0 +1,56 @@
+2026-04-11 16:51:01,070 INFO Run log: /Users/anushayaramala/Local_LLAMA_Training/data/meta/logs/preprocess_20260411T235101Z.log
+2026-04-11 16:51:01,070 INFO Pipeline version: 2.0.0
+2026-04-11 16:51:01,070 INFO Project root: /Users/anushayaramala/Local_LLAMA_Training
+2026-04-11 16:51:01,070 INFO Tokenizer model: hf-internal-testing/llama-tokenizer
+2026-04-11 16:51:03,490 INFO Found 34 blog files.
+2026-04-11 16:51:03,498 INFO   [OK] blog_001_multiple_llms_blog_generation_workflow.ipynb.txt  -> 6 chunk(s)
+2026-04-11 16:51:03,507 INFO   [OK] blog_002_how_do_you_evaluate_llm_applications_metrics_benchmarks_and_.txt  -> 7 chunk(s)
+2026-04-11 16:51:03,513 INFO   [OK] blog_003_how_do_you_design_scalable_llm_systems_from_api_to_productio.txt  -> 4 chunk(s)
+2026-04-11 16:51:03,520 INFO   [OK] blog_004_how_do_you_build_a_productionready_rag_pipeline_endtoend.txt  -> 6 chunk(s)
+2026-04-11 16:51:03,526 INFO   [OK] blog_005_how_do_you_do_advanced_prompt_engineering_for_production_llm.txt  -> 4 chunk(s)
+2026-04-11 16:51:03,532 INFO   [OK] blog_006_how_do_vector_databases_and_embeddings_work_in_ai_systems.txt  -> 4 chunk(s)
+2026-04-11 16:51:03,535 INFO   [OK] blog_007_How_do_you_monitor_and_maintain_ML_models_after_deployment.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,541 INFO   [OK] blog_008_guardrails_blog.txt  -> 5 chunk(s)
+2026-04-11 16:51:03,548 INFO   [OK] blog_009_memory_blog.txt  -> 5 chunk(s)
+2026-04-11 16:51:03,556 INFO   [OK] blog_010_how_do_you_design_multiagent_ai_systems_with_langgraph.txt  -> 7 chunk(s)
+2026-04-11 16:51:03,563 INFO   [OK] blog_011_how_do_you_evaluate_and_monitor_llm_applications_in_producti.txt  -> 5 chunk(s)
+2026-04-11 16:51:03,564 INFO   [OK] blog_012_how_to_evaluate_ml_models_in_production.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,565 INFO   [OK] blog_013_how_to_deploy_ml_models_in_production.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,566 INFO   [OK] blog_014_how_to_monitor_and_maintain_ml_models.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,572 INFO   [OK] blog_015_multi_agent_vs_single_agent_decision.txt  -> 5 chunk(s)
+2026-04-11 16:51:03,577 INFO   [OK] blog_016_do_you_need_an_llm_solution.txt  -> 4 chunk(s)
+2026-04-11 16:51:03,582 INFO   [OK] blog_017_choose_right_ai_evaluation_metrics.txt  -> 3 chunk(s)
+2026-04-11 16:51:03,583 INFO   [OK] blog_018_How_do_you_handle_data_drift_and_model_drift_in_ML_systems.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,595 INFO   [OK] blog_019_batch_vs_realtime_ml.txt  -> 10 chunk(s)
+2026-04-11 16:51:03,607 INFO   [OK] blog_020_agent_vs_pipeline.txt  -> 10 chunk(s)
+2026-04-11 16:51:03,620 INFO   [OK] blog_021_choose_embedding_model.txt  -> 11 chunk(s)
+2026-04-11 16:51:03,621 INFO   [SKIP duplicate] blog_021_choose_embedding_models.txt
+2026-04-11 16:51:03,634 INFO   [OK] blog_022_open_source_vs_api_models.txt  -> 12 chunk(s)
+2026-04-11 16:51:03,650 INFO   [OK] blog_023_choose_vector_database.txt  -> 15 chunk(s)
+2026-04-11 16:51:03,667 INFO   [OK] blog_024_rag_vs_finetuning.txt  -> 15 chunk(s)
+2026-04-11 16:51:03,689 INFO   [OK] blog_025_choose_llm_for_use_case.txt  -> 21 chunk(s)
+2026-04-11 16:51:03,708 INFO   [OK] blog_026_multi_agent_vs_single_agent.txt  -> 17 chunk(s)
+2026-04-11 16:51:03,725 INFO   [OK] blog_027_do_you_need_llm.txt  -> 15 chunk(s)
+2026-04-11 16:51:03,741 INFO   [OK] blog_028_evaluation_metrics_ai.txt  -> 15 chunk(s)
+2026-04-11 16:51:03,756 INFO   [OK] blog_029_cloud_vs_self_hosted_ai.txt  -> 15 chunk(s)
+2026-04-11 16:51:03,766 INFO   [OK] blog_030_choose_data_storage_strategy_sql_nosql_vector.txt  -> 8 chunk(s)
+2026-04-11 16:51:03,768 INFO   [OK] blog_031_model_size_vs_cost_tradeoff.txt  -> 2 chunk(s)
+2026-04-11 16:51:03,769 INFO   [OK] blog_032_langgraph_vs_langchain.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,771 INFO   [OK] blog_033_latency_vs_accuracy_tradeoff.txt  -> 1 chunk(s)
+2026-04-11 16:51:03,787 INFO Done!
+─────────────────────────────────────────
+  Documents processed : 33
+  Total chunks        : 234
+  Dropped low-quality : 4
+  Train chunks        : 203  (30 docs)
+  Val   chunks        : 31  (3 docs)
+
+Output files:
+  /Users/anushayaramala/Local_LLAMA_Training/data/processed/blog_corpus.jsonl
+  /Users/anushayaramala/Local_LLAMA_Training/data/processed/blog_chunks.jsonl
+  /Users/anushayaramala/Local_LLAMA_Training/data/processed/train.jsonl
+  /Users/anushayaramala/Local_LLAMA_Training/data/processed/val.jsonl
+  /Users/anushayaramala/Local_LLAMA_Training/data/meta/blog_index.csv
+  /Users/anushayaramala/Local_LLAMA_Training/data/meta/preprocess_runs/20260411T235101Z.json
+  /Users/anushayaramala/Local_LLAMA_Training/data/processed/runs/20260411T235101Z
+─────────────────────────────────────────

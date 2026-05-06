@@ -1,0 +1,187 @@
+Great — I’ll continue in **batches** so each blog stays high quality and follows your exact format.
+
+Here are the **next 2 full blogs**.
+
+---
+
+# How do you design multi-agent AI systems with LangGraph?
+
+Well, basically, multi-agent systems are setups where multiple AI components work together instead of one model doing everything. They exist because real problems are too complex for a single prompt or single agent to handle well. Unlike a normal chatbot, each agent has a specific role like retrieval, reasoning, or action. A simple way to think about it is like a team of specialists instead of one generalist. A common mistake beginners make is building too many agents without clear responsibilities.
+
+---
+
+## Real-world example
+
+A common pattern in large companies is using multiple AI components to handle customer support workflows. Instead of one chatbot trying to do everything, the system splits responsibilities. One component handles intent detection, another retrieves knowledge, another decides escalation, and another formats the response. These components communicate through a shared state or workflow engine. This makes the system more reliable and easier to debug. If one part fails, it can be improved independently. It also allows companies to add new capabilities without rewriting everything. Over time, these systems evolve into orchestrated pipelines with monitoring and fallback logic. This modular design is what makes multi-agent systems practical in production. It also aligns well with microservices architecture.
+
+---
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**LangGraph**
+Good for defining stateful workflows and multi-agent graphs.
+Production friendly because it supports deterministic flows, retries, and structured execution.
+
+**OpenAI API**
+Used for reasoning and tool calling inside agents.
+Production friendly because of stability and scalability.
+
+**Azure Cosmos DB**
+Used for storing state and checkpoints.
+Production friendly because of durability and distributed scaling.
+
+---
+
+### Experimentation / prototyping options
+
+**CrewAI**
+Simple framework to experiment with multiple agents.
+
+**AutoGen**
+Good for testing agent collaboration ideas quickly.
+
+---
+
+## Production Example using LangGraph + OpenAI
+
+### Setup explanation
+
+Let’s build a proper multi-agent system, not just a demo loop. Many examples online show agents calling each other, but they don’t include things like retries, validation, or logging. Here we will build a system that mimics a real support workflow. We’ll define agents like classifier, retriever, and responder. We’ll manage state using LangGraph. We’ll also include environment variables for API keys, structured logging for debugging, retries for API calls, timeouts for safety, and validation to avoid bad inputs. We will also design clear interfaces between agents so each step is predictable. This makes debugging easier. It may look slightly more complex, but this is how production systems are built.
+
+---
+
+### Setup code
+
+```python
+# pip install langgraph openai python-dotenv tenacity
+
+import os
+import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+```
+
+---
+
+## Step 1: Define state
+
+We define a shared state object.
+
+```python
+def initial_state(query):
+    return {
+        "query": query,
+        "intent": None,
+        "context": None,
+        "response": None
+    }
+```
+
+---
+
+## Step 2: Intent classifier agent
+
+```python
+@retry(stop=stop_after_attempt(3))
+def classify_intent(state):
+    prompt = f"Classify intent: {state['query']}"
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        timeout=10
+    )
+    state["intent"] = res.choices[0].message.content
+    return state
+```
+
+---
+
+## Step 3: Retrieval agent
+
+```python
+def retrieve_context(state):
+    # mock retrieval
+    state["context"] = f"Relevant info for {state['query']}"
+    return state
+```
+
+---
+
+## Step 4: Response agent
+
+```python
+def generate_response(state):
+    prompt = f"""
+Answer using context only:
+Context: {state['context']}
+Query: {state['query']}
+"""
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    state["response"] = res.choices[0].message.content
+    return state
+```
+
+---
+
+## Step 5: Pipeline execution
+
+```python
+def run_pipeline(query):
+    state = initial_state(query)
+    
+    if not query:
+        raise ValueError("Invalid query")
+    
+    state = classify_intent(state)
+    state = retrieve_context(state)
+    state = generate_response(state)
+    
+    logger.info(state)
+    
+    return state["response"]
+```
+
+---
+
+## Step 6: Evaluation
+
+```python
+def test():
+    result = run_pipeline("Reset my password")
+    assert result is not None
+```
+
+---
+
+## Wrap-up
+
+### Key takeaways
+
+* Multi-agent systems split responsibilities
+* Shared state is critical
+* Logging and retries improve reliability
+
+### Common pitfalls
+
+* Too many agents
+* No clear responsibilities
+* No validation
+
+### Next steps
+
+* Add LangGraph routing
+* Add persistence
+* Add monitoring

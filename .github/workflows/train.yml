@@ -1,0 +1,94 @@
+name: SFT Training Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/processed/sft/**"
+      - "scripts/**"
+      - "requirements.txt"
+  workflow_dispatch:
+    inputs:
+      mlflow_experiment:
+        description: "MLflow experiment name"
+        required: false
+        default: "qlora-blog-sft"
+
+env:
+  PYTHON_VERSION: "3.11"
+  AML_WORKSPACE: ${{ vars.AML_WORKSPACE }}
+  AML_RESOURCE_GROUP: ${{ vars.AML_RESOURCE_GROUP }}
+  AML_SUBSCRIPTION: ${{ vars.AML_SUBSCRIPTION }}
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+
+jobs:
+  validate:
+    name: Validate SFT Dataset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run dataset validation (strict gate)
+        run: python scripts/validate_sft_dataset.py --strict
+
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-report
+          path: data/meta/validation_runs/
+          retention-days: 30
+
+  submit-training-staging:
+    name: Submit Training Job (staging)
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AML_SUBSCRIPTION }}
+
+      - name: Install Azure ML CLI
+        run: az extension add --name ml --yes
+
+      - name: Upload data assets
+        run: |
+          RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
+          az ml data create \
+            --name blog-sft-conversations \
+            --version "$RUN_ID" \
+            --path data/processed/sft/ \
+            --type uri_folder \
+            --workspace-name "$AML_WORKSPACE" \
+            --resource-group "$AML_RESOURCE_GROUP" \
+            --subscription "$AML_SUBSCRIPTION"
+
+      - name: Submit staging training job
+        run: |
+          az ml job create \
+            --file azure/train_job.yml \
+            --workspace-name "$AML_WORKSPACE" \
+            --resource-group "$AML_RESOURCE_GROUP" \
+            --subscription "$AML_SUBSCRIPTION" \
+            --set display_name="qlora-sft-staging-$(date -u +%Y%m%dT%H%M%SZ)"
+
+

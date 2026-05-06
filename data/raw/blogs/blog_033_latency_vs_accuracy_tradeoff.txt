@@ -1,0 +1,23 @@
+# How do you decide the right latency vs accuracy trade-off in AI systems?
+
+Well, basically, this trade-off is about deciding whether your AI should be fast or highly accurate. It exists because faster models are usually smaller and less accurate, while larger models are slower but more powerful. Unlike demos, real systems must match user expectations. A simple analogy is fast food vs fine dining. One common mistake is always choosing accuracy even when speed matters more.
+
+## Real-world example
+
+DoorDash uses fast models for simple queries and slower models for complex issues.
+
+## Wrap-up
+
+Key takeaways
+- Speed matters for UX
+- Accuracy matters for critical tasks
+- Balance both
+
+Common pitfalls
+- Ignoring latency
+- Overusing large models
+- No monitoring
+
+Next steps
+- Measure latency
+- Optimize routing

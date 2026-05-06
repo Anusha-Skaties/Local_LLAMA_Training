@@ -1,0 +1,57 @@
+# azure/train_job.yml
+# Azure ML command job for QLoRA SFT training.
+#
+# Submit with:
+#   az ml job create -f azure/train_job.yml \
+#     --workspace-name <workspace> \
+#     --resource-group <rg>
+#
+# Required repo variables (set in GitHub → Settings → Variables):
+#   AML_WORKSPACE, AML_RESOURCE_GROUP, AML_SUBSCRIPTION
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+
+type: command
+
+display_name: qlora-blog-sft
+experiment_name: qlora-blog-sft
+
+# NCasT4_v3 is cost-effective (T4 GPU); uses serverless compute to bypass subscription GPU quota limits.
+# Omitting 'compute' field triggers Azure ML serverless mode — no cluster needed.
+
+environment: azureml://registries/azureml/environments/acpt-pytorch-2.2-cuda12.1/labels/latest
+
+code: .
+
+command: >-
+  pip install -r requirements.txt &&
+  python scripts/train_qlora_sft.py
+  --model-name meta-llama/Llama-3.2-3B-Instruct
+  --train-file ${{inputs.train_file}}/train_conversations.jsonl
+  --val-file ${{inputs.val_file}}/val_conversations.jsonl
+  --output-root ${{outputs.model_output}}
+  --max-seq-length 2048
+  --num-train-epochs 3
+  --per-device-train-batch-size 1
+  --gradient-accumulation-steps 16
+  --learning-rate 2e-4
+  --eval-steps 50
+  --save-steps 50
+  --mlflow-experiment qlora-blog-sft
+
+inputs:
+  train_file:
+    type: uri_folder
+    path: azureml:blog-sft-conversations@latest
+  val_file:
+    type: uri_folder
+    path: azureml:blog-sft-conversations@latest
+
+outputs:
+  model_output:
+    type: uri_folder
+    mode: rw_mount
+
+resources:
+  instance_type: Standard_NC4as_T4_v3
+  instance_count: 1

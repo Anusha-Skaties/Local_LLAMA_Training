@@ -1,0 +1,253 @@
+# How do you determine if your system actually needs an AI agent or just a simple pipeline?
+
+Well, basically, an agent system is when an LLM can decide steps, call tools, and keep state to complete a task, not just answer a question. They exist because some workflows are messy and need decisions, like “if this, do that, else escalate.” That’s different from a normal chatbot because a chatbot talks, while an agent system acts in a controlled way. A simple mental model is a customer support rep following a playbook with buttons to click. A common beginner mistake is adding an agent when the task was just “transform input to output” and a normal pipeline would be safer.
+
+
+
+
+
+
+
+## Real-world example
+
+Amazon is a useful single-company example because it’s publicly known they run huge customer support and logistics operations with lots of automation. In an Amazon style internal workflow, many tasks are pure pipelines, like “extract tracking number, look up shipment status, send a templated reply.” That does not need an agent, it needs deterministic code and good templates. But other cases require more branching, like “check policy, verify order state, decide whether to refund, then route to a human if uncertain.” That’s closer to agent territory, because decisions and tool calls matter and the system needs guardrails. The right call is often based on how many branches exist and how costly mistakes are. If mistakes are expensive, you want more determinism and less model freedom. Agents can still be used, but you keep them on a short leash with strict tools and approvals.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**Temporal**  
+
+Good at orchestrating multi-step workflows with retries, state, and durable execution.  
+
+Production-friendly because it handles failures, retries, and visibility into workflow state.
+
+**FastAPI**  
+
+Good at exposing a clean service interface for pipelines and agent actions.  
+
+Production-friendly because it’s performant, well understood, and easy to integrate.
+
+**OpenTelemetry**  
+
+Good at tracing step-by-step workflow execution.  
+
+Production-friendly because it standardizes observability.
+
+**Kubernetes**  
+
+Good at running workers and services reliably.  
+
+Production-friendly because it supports scaling and fault recovery.
+
+### Experimentation / prototyping options
+
+**LangGraph**  
+
+Good for learning agent graphs and state transitions.  
+
+Great for prototyping because you can iterate quickly.
+
+**LangChain**  
+
+Good for quick tool calling prototypes.  
+
+Great for prototyping because it reduces glue code.
+
+**Jupyter**  
+
+Good for exploring a workflow before turning it into a service.  
+
+Great for prototyping because iteration is fast.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: Temporal
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We’ll build internal IT ticket routing plus automation. This is perfect for the “agent or pipeline” question because most of it should be a pipeline.  
+
+Temporal lets us define a workflow with durable state, so if the worker dies mid-ticket, it resumes instead of losing the task.  
+
+We’ll install `temporalio` for Temporal, `pydantic` for validation, and `python-json-logger` for structured logs.  
+
+We’ll use env vars for Temporal server address.  
+
+We’ll add retries and backoff at activity boundaries.  
+
+We’ll add timeouts for each step.  
+
+We’ll define deterministic tool interfaces for each activity.  
+
+We’ll add a rule: if confidence is low, escalate to a human queue.  
+
+We’ll add an evaluation hook that checks the workflow chose an allowed route.  
+
+We’ll add telemetry hooks.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install temporalio pydantic python-json-logger
+
+# This is a runnable-ish skeleton; to actually run you'd need a Temporal server.
+# The key point is structure and production features.
+
+import os
+import logging
+from typing import Dict, Any, Literal, Optional
+from dataclasses import dataclass
+
+from temporalio import workflow, activity
+from pythonjsonlogger import jsonlogger
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger("temporal_it")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+class Ticket(BaseModel):
+    subject: str = Field(min_length=3)
+    body: str = Field(min_length=10)
+
+class RouteResult(BaseModel):
+    team: Literal["it_helpdesk", "security", "network"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    escalation: bool
+
+@activity.defn
+async def classify_ticket(ticket: Ticket) -> RouteResult:
+    text = (ticket.subject + " " + ticket.body).lower()
+    if "phish" in text or "malware" in text:
+        return RouteResult(team="security", confidence=0.8, escalation=False)
+    return RouteResult(team="it_helpdesk", confidence=0.6, escalation=False)
+
+@activity.defn
+async def create_ticket_in_system(ticket: Ticket, team: str) -> str:
+    # Deterministic interface: returns ticket_id
+    return "TICK-123"
+
+@workflow.defn
+class ITWorkflow:
+    @workflow.run
+    async def run(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
+        t = Ticket(**ticket)
+
+        route = await workflow.execute_activity(
+            classify_ticket,
+            t,
+            start_to_close_timeout=5,
+            retry_policy=workflow.RetryPolicy(initial_interval=0.2, maximum_interval=2.0, maximum_attempts=3),
+        )
+
+        escalation = route.confidence < 0.5
+        ticket_id = await workflow.execute_activity(
+            create_ticket_in_system,
+            t,
+            route.team,
+            start_to_close_timeout=10,
+            retry_policy=workflow.RetryPolicy(initial_interval=0.2, maximum_interval=2.0, maximum_attempts=3),
+        )
+
+        return {"team": route.team, "confidence": route.confidence, "escalation": escalation, "ticket_id": ticket_id}
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Make most steps deterministic**  
+
+This is how you avoid agent chaos.
+
+```python
+@activity.defn
+async def create_ticket_in_system(...)
+```
+
+**Step 2: Put retries and timeouts on every step**  
+
+Temporal makes this natural.
+
+```python
+start_to_close_timeout=10
+```
+
+**Step 3: Escalate on low confidence**  
+
+This is safer than pretending.
+
+```python
+escalation = route.confidence < 0.5
+```
+
+### Tool 2: FastAPI
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+FastAPI gives us a simple front door for creating tickets. It’s not the agent, it’s the API layer.  
+
+We validate the payload.  
+
+We add request IDs and structured logs.  
+
+We call Temporal to start the workflow.  
+
+We enforce size limits and timeouts.  
+
+We avoid logging raw ticket bodies.  
+
+We add a basic rate limit stub.  
+
+We return a workflow ID so the UI can poll status.  
+
+We add health endpoints.  
+
+We add observability hooks.  
+
+And we keep responsibilities clean: API receives, workflow runs.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install fastapi uvicorn pydantic python-json-logger
+# This would call Temporal client in real code; omitted for brevity.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Decide if you need an agent**  
+
+If classification + routing rules work, keep it a pipeline.  
+
+Only add an agent if you truly need flexible decision making, and even then constrain with tools.
+
+```python
+# Rule of thumb:
+# if steps are well-defined and errors are costly -> pipeline/workflow
+# if tasks require flexible reasoning with many unknown branches -> constrained agent
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- If you can write it as a workflow, start as a workflow.
+- Agents are for messy branching and tool use, not for basic data movement.
+- Constrain model freedom with deterministic tools and escalation paths.
+- Observability and retries matter more than fancy prompts.
+
+### Common pitfalls
+
+- Using an agent for simple ETL.
+- No escalation path.
+- No step timeouts, so workflows hang.
+- No logs or traceability.
+
+### Next steps
+
+- Add a tiny labeled set and measure routing accuracy.
+- Add approval gates for destructive actions.
+- Add dashboards for escalations and failure rates.
+- Consider a small model just for classification if needed.

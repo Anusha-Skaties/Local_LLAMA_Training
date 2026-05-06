@@ -1,0 +1,289 @@
+# How do you decide between open-source models and API-based models?
+
+Well, basically, an agent system is a structured setup where an LLM can call tools and follow steps, not just chat. They exist because you often need reliability, cost control, and integrations, not just clever text. They’re different from a normal chatbot because they can enforce policies, log actions, and route work safely. A simple mental model is renting a car (API model) versus owning a car (open-source model) depending on how much you drive and how much control you need. A common beginner mistake is choosing open-source for “control” but then not budgeting for serving, monitoring, and incident response.
+
+
+
+
+
+
+
+## Real-world example
+
+Meta is an obvious example of a company strongly associated with open models, because Llama models are publicly released and widely discussed. For a Meta style team, using open models internally can reduce dependency on external vendors and allow deeper customization, including fine-tuning on internal tasks. They can also run models in their own infrastructure to control data handling and latency. On the other hand, in many teams outside Meta, API based models are attractive because you can ship faster without managing GPUs, scaling, or model upgrades. The decision often comes down to whether model serving is a core competency for the team. If you need strict data locality, open deployment might be required. If you need the fastest path to production with fewer operational burdens, API models often win.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**Kubernetes**  
+
+Good at running self-hosted model services and scaling them safely.  
+
+Production-friendly because it supports rollouts, health checks, and isolation.
+
+**vLLM**  
+
+Good at efficient inference serving for open weight models.  
+
+Production-friendly because it targets throughput and stable serving patterns.
+
+**AWS Bedrock**  
+
+Good at consuming API based models with managed security and governance features.  
+
+Production-friendly because it integrates with IAM, logging, and managed infra.
+
+**OpenTelemetry**  
+
+Good at monitoring latency, error rates, and tracing calls across services.  
+
+Production-friendly because it standardizes observability.
+
+### Experimentation / prototyping options
+
+**Ollama**  
+
+Good for quick local open-model experiments.  
+
+Great for prototyping because you can test without cloud accounts.
+
+**LM Studio**  
+
+Good for local testing of models with a UI.  
+
+Great for prototyping because it reduces setup friction.
+
+**Python notebooks**  
+
+Good for quick comparisons and tiny evals.  
+
+Great for prototyping because iteration is fast.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: AWS Bedrock
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We’ll build a sales lead enrichment plus email drafting workflow with approvals. That’s a good “API model” example because you want speed and reliability.  
+
+We’ll use Bedrock as the model gateway.  
+
+We’ll install `boto3` and `botocore` for AWS calls.  
+
+We’ll use env vars for AWS region and credentials, or rely on instance roles.  
+
+We’ll add retries and timeouts around the model call.  
+
+We’ll log structured events but we’ll avoid logging the full lead data to prevent leaks.  
+
+We’ll validate inputs and enforce prompt rules.  
+
+We’ll add an approval gate that returns a draft but does not “send” anything.  
+
+We’ll add an eval hook that checks the email includes required fields and does not include prohibited claims.  
+
+We’ll add an observability hook for traces and metrics.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install fastapi uvicorn boto3 pydantic pydantic-settings tenacity python-json-logger
+
+import os
+import time
+import uuid
+import logging
+from typing import Optional, Dict, Any
+
+import boto3
+from botocore.config import Config as BotoConfig
+from fastapi import FastAPI, Header, HTTPException
+from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from pythonjsonlogger import jsonlogger
+
+class Settings(BaseSettings):
+    AWS_REGION: str = Field(default="us-east-1")
+    BEDROCK_MODEL_ID: str = Field(default="some-model-id")
+    TIMEOUT_S: int = Field(default=10)
+
+settings = Settings()
+
+logger = logging.getLogger("api_model_service")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s %(request_id)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+app = FastAPI(title="API vs Open Source Model Choice Demo")
+
+boto_cfg = BotoConfig(connect_timeout=2, read_timeout=settings.TIMEOUT_S, retries={"max_attempts": 3})
+bedrock = boto3.client("bedrock-runtime", region_name=settings.AWS_REGION, config=boto_cfg)
+
+class LeadDraftRequest(BaseModel):
+    company: str = Field(min_length=2)
+    contact_role: str = Field(min_length=2)
+    product: str = Field(min_length=2)
+    notes: str = Field(default="", max_length=1000)
+
+class LeadDraftResponse(BaseModel):
+    request_id: str
+    draft_email: str
+    needs_approval: bool
+    latency_ms: int
+
+def build_prompt(req: LeadDraftRequest) -> str:
+    rules = (
+        "You draft a sales email.\n"
+        "Rules:\n"
+        "1) Do not claim you have used the customer's product.\n"
+        "2) Do not invent facts.\n"
+        "3) Keep it under 160 words.\n"
+        "4) Output plain text only.\n"
+    )
+    return (
+        f"{rules}\n"
+        f"Company: {req.company}\n"
+        f"Role: {req.contact_role}\n"
+        f"Product: {req.product}\n"
+        f"Notes: {req.notes}\n"
+    )
+
+def eval_hook(text: str) -> None:
+    if len(text.strip()) == 0:
+        raise RuntimeError("Empty draft")
+    if "I saw you using" in text:
+        raise RuntimeError("Prohibited claim detected")
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0),
+    retry=retry_if_exception_type(Exception),
+)
+def call_bedrock(prompt: str) -> str:
+    # Placeholder structure. Actual request body depends on the specific model.
+    body = {"prompt": prompt}
+    resp = bedrock.invoke_model(modelId=settings.BEDROCK_MODEL_ID, body=str(body).encode("utf-8"))
+    raw = resp["body"].read().decode("utf-8")
+    return raw[:2000]
+
+@app.post("/draft", response_model=LeadDraftResponse)
+def draft(req: LeadDraftRequest, x_request_id: Optional[str] = Header(default=None)):
+    request_id = x_request_id or str(uuid.uuid4())
+    start = time.time()
+
+    logger.info("draft_received", extra={"request_id": request_id, "company": req.company})
+
+    prompt = build_prompt(req)
+    try:
+        draft_text = call_bedrock(prompt)
+    except Exception as e:
+        logger.error("model_call_failed", extra={"request_id": request_id, "error": str(e)})
+        raise HTTPException(status_code=502, detail="Model call failed")
+
+    eval_hook(draft_text)
+
+    latency_ms = int((time.time() - start) * 1000)
+    logger.info("draft_done", extra={"request_id": request_id, "latency_ms": latency_ms})
+
+    # Observability hook: traces/metrics here
+    return LeadDraftResponse(
+        request_id=request_id,
+        draft_email=draft_text,
+        needs_approval=True,
+        latency_ms=latency_ms,
+    )
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Approval gate**  
+
+Drafting is safer than auto sending.
+
+```python
+return LeadDraftResponse(..., needs_approval=True, ...)
+```
+
+**Step 2: Prompt rules**  
+
+API models can still hallucinate, so you constrain.
+
+```python
+rules = "Do not invent facts..."
+```
+
+**Step 3: Retries and timeouts**  
+
+You need bounded calls.
+
+```python
+BotoConfig(..., retries={"max_attempts": 3})
+```
+
+### Tool 2: vLLM
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+Now the open-source side: self-host a model with vLLM.  
+
+This gives you control, but you own uptime and costs.  
+
+We’ll keep the same API contract so the rest of the app doesn’t care.  
+
+We’ll use env vars for the local endpoint and model name.  
+
+We’ll add timeouts, retries, logs, and request IDs.  
+
+We’ll add rate limiting and payload caps.  
+
+We’ll add a fallback model if the primary is down.  
+
+We’ll add a small evaluation hook.  
+
+We’ll add telemetry hooks.  
+
+And we’ll keep prompts locked down, because self hosted does not mean safe by default.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install httpx tenacity python-json-logger pydantic
+# See the earlier vLLM router example; vLLM is the serving layer for open models.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Same interface, different backend**  
+
+This makes switching feasible.
+
+```python
+# call_llm(base_url, model_name, prompt) returns text
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- API models are renting: faster start, less ops, but ongoing usage costs and dependency.
+- Open-source models are owning: more control, but you run infra and carry reliability risk.
+- Decide based on data constraints, latency needs, and whether you can operate GPUs well.
+- Use the same service interface so switching later is not a rewrite.
+
+### Common pitfalls
+
+- Choosing open-source without a plan for serving and monitoring.
+- Choosing API without cost controls and caching.
+- Logging sensitive inputs by accident.
+- No approval gates for outbound messages.
+
+### Next steps
+
+- Add a cost meter per request and alert on spikes.
+- Add a model quality eval suite for your main tasks.
+- Add per-tenant rate limits.
+- Add a safe fallback response when the model backend is unhealthy.

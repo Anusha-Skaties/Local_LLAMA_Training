@@ -1,0 +1,50 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_job_id:
+        description: "Staging job ID to promote (from Azure ML Studio)"
+        required: true
+      reason:
+        description: "Reason for promotion (e.g. ROUGE-L improved, style similarity good)"
+        required: true
+
+env:
+  AML_WORKSPACE: ${{ vars.AML_WORKSPACE }}
+  AML_RESOURCE_GROUP: ${{ vars.AML_RESOURCE_GROUP }}
+  AML_SUBSCRIPTION: ${{ vars.AML_SUBSCRIPTION }}
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+
+jobs:
+  promote-to-production:
+    name: Submit Production Training Job
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AML_SUBSCRIPTION }}
+
+      - name: Install Azure ML CLI
+        run: az extension add --name ml --yes
+
+      - name: Submit production training job
+        run: |
+          az ml job create \
+            --file azure/train_job.yml \
+            --workspace-name "$AML_WORKSPACE" \
+            --resource-group "$AML_RESOURCE_GROUP" \
+            --subscription "$AML_SUBSCRIPTION" \
+            --set display_name="qlora-sft-prod-$(date -u +%Y%m%dT%H%M%SZ)" \
+            --set tags.promoted_from="${{ github.event.inputs.staging_job_id }}" \
+            --set tags.promotion_reason="${{ github.event.inputs.reason }}"

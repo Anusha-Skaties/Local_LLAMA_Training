@@ -1,0 +1,40 @@
+{
+  "status": "passed_with_warnings",
+  "validated_at": "2026-04-12T04:48:23Z",
+  "sft_dir": "/Users/anushayaramala/Local_LLAMA_Training/data/processed/sft",
+  "config": {
+    "min_assistant_chars": 400,
+    "max_short_assistant_percent": 5.0,
+    "strict": false
+  },
+  "counts": {
+    "all_records": 99,
+    "train_records": 90,
+    "val_records": 9,
+    "train_blog_ids": 30,
+    "val_blog_ids": 3
+  },
+  "metrics": {
+    "assistant_length_chars": {
+      "min": 461,
+      "max": 16150,
+      "mean": 5756.85,
+      "median": 4651,
+      "short_count": 0,
+      "short_percent": 0.0,
+      "min_assistant_chars": 400,
+      "max_short_assistant_percent": 5.0
+    },
+    "leakage": {
+      "overlap_record_ids": 0,
+      "overlap_blog_ids": 0
+    },
+    "duplicates": {
+      "assistant_duplicates": 66
+    }
+  },
+  "errors": [],
+  "warnings": [
+    "duplicate assistant responses detected: 66"
+  ]
+}

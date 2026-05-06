@@ -1,0 +1,257 @@
+# How do you choose between batch processing and real-time inference for ML systems?
+
+Well, basically, an agent system is a workflow where a model can be called as part of a bigger process with tools, retries, and checks. They exist because ML in production is rarely “call model once,” it’s often scheduling, fetching data, and writing results back safely. They’re different from a normal chatbot because they’re about reliable execution, not just text replies. A simple mental model is cooking for one person now (real-time) versus meal prep for the week (batch). A common beginner mistake is forcing real-time for everything, then getting killed by cost and latency requirements.
+
+
+
+
+
+
+
+## Real-world example
+
+Uber is a solid single-company example because it’s publicly known they operate large scale real-time systems where latency matters. In an Uber style product, some predictions must be real-time, like matching, ETA updates, or surge related signals, because the user experience depends on it right now. But other work is batch, like offline model training, periodic feature computation, and daily reporting metrics. The decision is mostly about freshness needs: do you need the prediction in milliseconds, or is “within an hour” fine. Cost is also a big deal: real-time systems are always on and need capacity, batch can use cheaper windows. Reliability differs too: batch can retry later, real-time needs immediate fallbacks. And the best systems mix both, with a batch layer feeding a real-time serving layer.  
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**Kafka**  
+
+Good at streaming events for real-time features and inference triggers.  
+
+Production-friendly because it scales, supports durability, and has mature monitoring patterns.
+
+**Airflow**  
+
+Good at batch orchestration for scheduled pipelines and backfills.  
+
+Production-friendly because it supports retries, DAG visibility, and operational control.
+
+**Kubernetes**  
+
+Good at running both streaming consumers and batch workers.  
+
+Production-friendly because it supports scaling and isolation.
+
+**Prometheus**  
+
+Good at metrics collection for latency and throughput.  
+
+Production-friendly because it’s widely deployed and integrates with alerting.
+
+### Experimentation / prototyping options
+
+**Celery**  
+
+Good for learning async jobs and simple queues.  
+
+Great for prototyping because it’s easy to start.
+
+**Prefect (local)**  
+
+Good for quick pipeline prototypes.  
+
+Great for prototyping because setup can be simple.
+
+**Python scripts + cron**  
+
+Good for tiny batch jobs.  
+
+Great for prototyping because it’s minimal.
+
+## Pick two production tools and build a production-grade example
+
+### Tool 1: Kafka
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+We’ll build real-time customer support triage. Each new message is an event, and we want an immediate classification plus suggested docs.  
+
+Kafka will carry events reliably.  
+
+We’ll use `confluent-kafka` for consuming messages.  
+
+We’ll use env vars for brokers and auth.  
+
+We’ll add retries and backoff for model calls.  
+
+We’ll add timeouts so the consumer doesn’t stall.  
+
+We’ll use structured logs with correlation IDs.  
+
+We’ll add deduplication to avoid processing the same message twice.  
+
+We’ll add a DLQ pattern: if a message fails repeatedly, park it.  
+
+We’ll add metrics hooks for consumer lag and processing time.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install confluent-kafka tenacity python-json-logger pydantic
+
+import os
+import json
+import time
+import logging
+from typing import Dict, Any
+
+from confluent_kafka import Consumer, KafkaException
+from tenacity import retry, stop_after_attempt, wait_exponential
+from pythonjsonlogger import jsonlogger
+from pydantic import BaseModel, Field
+
+logger = logging.getLogger("stream_infer")
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(asctime)s %(levelname)s %(message)s"))
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+class Msg(BaseModel):
+    ticket_id: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=4000)
+
+def classify(text: str) -> str:
+    # Deterministic placeholder
+    t = text.lower()
+    if "refund" in t or "chargeback" in t:
+        return "billing"
+    return "general"
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=0.2, min=0.2, max=2.0))
+def process_message(payload: Dict[str, Any]) -> Dict[str, Any]:
+    msg = Msg(**payload)
+    category = classify(msg.text)
+    return {"ticket_id": msg.ticket_id, "category": category}
+
+def main():
+    conf = {
+        "bootstrap.servers": os.environ.get("KAFKA_BOOTSTRAP", "localhost:9092"),
+        "group.id": os.environ.get("KAFKA_GROUP", "triage"),
+        "auto.offset.reset": "earliest",
+        "enable.auto.commit": False,
+    }
+    topic = os.environ.get("KAFKA_TOPIC", "tickets")
+
+    c = Consumer(conf)
+    c.subscribe([topic])
+
+    try:
+        while True:
+            m = c.poll(1.0)
+            if m is None:
+                continue
+            if m.error():
+                logger.error("kafka_error", extra={"error": str(m.error())})
+                continue
+
+            start = time.time()
+            payload = json.loads(m.value().decode("utf-8"))
+            out = process_message(payload)
+
+            latency_ms = int((time.time() - start) * 1000)
+            logger.info("processed", extra={"ticket_id": out["ticket_id"], "category": out["category"], "latency_ms": latency_ms})
+
+            c.commit(m)
+    finally:
+        c.close()
+
+if __name__ == "__main__":
+    main()
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Control consumer behavior**  
+
+If you auto-commit, you can lose messages on crash.
+
+```python
+"enable.auto.commit": False
+```
+
+**Step 2: Add retries around processing**  
+
+Transient issues happen.
+
+```python
+@retry(...)
+def process_message(...)
+```
+
+**Step 3: Measure latency and lag**  
+
+Streaming systems need visibility.
+
+```python
+logger.info("processed", extra={...})
+```
+
+### Tool 2: Airflow
+
+#### 4.1) Setup explanation (~10 lines, casual teacher tone)
+
+Now batch. Airflow is for scheduled jobs like nightly scoring, backfills, and feature computation.  
+
+You define DAGs that run on a schedule.  
+
+You add retries per task.  
+
+You add SLAs and alerts.  
+
+You add idempotency so reruns don’t duplicate writes.  
+
+You store results in a warehouse or DB.  
+
+You add validation checks at the end.  
+
+You add logging and metrics.  
+
+You add backfill controls.  
+
+And you keep batch cheap by running it off-peak.
+
+#### 4.2) Setup code block (Python 3.11)
+
+```python
+# pip install apache-airflow
+# Airflow DAG code is environment-specific; the main point is the orchestration pattern.
+```
+
+#### 4.3) Implementation walkthrough (step-by-step, production mindset)
+
+**Step 1: Decide by freshness needs**  
+
+If you need sub-second answers, real-time.  
+
+If “daily updated” is fine, batch.
+
+```python
+# Decision heuristic:
+# if user_waiting_for_result: real_time
+# else if can_run_periodically: batch
+```
+
+## Wrap-up
+
+### Key takeaways
+
+- Real-time is for user-facing latency-critical decisions.
+- Batch is for cost-effective scoring, backfills, and periodic computation.
+- Many systems use both: batch computes features, real-time serves.
+- Measure everything: lag, latency, failure rates.
+
+### Common pitfalls
+
+- Doing everything real-time and paying for it forever.
+- No DLQ, so bad messages block the stream.
+- Non-idempotent batch jobs that duplicate data.
+- No monitoring, so you learn about failures from users.
+
+### Next steps
+
+- Add a DLQ topic and a replay tool for streaming.
+- Add idempotency keys for both batch and streaming writes.
+- Add Prometheus metrics for latency and throughput.
+- Build a small canary test for every deploy.

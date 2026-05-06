@@ -1,0 +1,108 @@
+# How do you decide when to use multi-agent systems vs a single-agent setup?
+
+Well, basically, this decision is about whether one AI component is enough or you need multiple specialized components working together. It exists because some problems are simple enough for one agent, while others require coordination between multiple roles. Unlike a normal chatbot, multi-agent systems introduce structure, roles, and communication between components. A simple way to think about it is choosing between a single generalist and a team of specialists. A common mistake beginners make is jumping into multi-agent setups too early without understanding the actual complexity of the problem.
+
+## Real-world example
+
+A common pattern in large companies is starting with a single-agent system for customer support automation and then evolving into a multi-agent system as complexity grows. Initially, one model handles user queries, retrieves knowledge, and generates responses. Over time, as requirements increase, separate components are introduced. One handles intent classification, another handles retrieval, another manages escalation logic, and another formats responses. This modular setup improves reliability and makes debugging easier. Teams can improve individual components without affecting the entire system. It also allows better monitoring and control. The shift usually happens when the system becomes hard to maintain or scale as a single unit. This gradual transition is what makes multi-agent systems practical in production.
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+- LangGraph: Used for building stateful multi-agent workflows. Production friendly because of deterministic execution and control over flow.
+- OpenAI API: Used for reasoning and tool usage within agents. Production friendly because of reliability and scalability.
+
+### Experimentation / prototyping options
+
+- CrewAI: Useful for quickly testing multi-agent ideas.
+- AutoGen: Good for experimenting with agent collaboration.
+
+## Production Example using LangGraph + OpenAI
+
+### Setup explanation
+
+We will build a system that decides whether to use a single-agent or multi-agent approach for customer support. Many tutorials directly build multi-agent systems, but real systems evolve gradually. We will include input validation to ensure queries are valid. We will add structured logging so we can trace decisions. We will include retries for API failures and timeouts for safety. We will define clear agent roles to avoid confusion. We will also include a simple routing logic that decides whether a single agent is enough or multiple agents are required. We will use environment variables for API keys. We will design deterministic interfaces between agents. We will include evaluation hooks to check system behavior. This approach reflects real production design decisions.
+
+### Setup code
+
+# pip install openai python-dotenv tenacity
+
+import os
+import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+## Step 1: Input validation
+
+def validate(query):
+    if not query or len(query.strip()) < 3:
+        raise ValueError("Invalid query")
+
+## Step 2: Complexity detection
+
+def detect_complexity(query):
+    if "and" in query or "multiple" in query:
+        return "complex"
+    return "simple"
+
+## Step 3: Single-agent flow
+
+@retry(stop=stop_after_attempt(3))
+def single_agent(query):
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"user","content":query}],
+        timeout=10
+    )
+    return response.choices[0].message.content
+
+## Step 4: Multi-agent flow
+
+def multi_agent(query):
+    intent = "classified intent"
+    context = f"context for {query}"
+    response = f"processed response using {intent} and {context}"
+    return response
+
+## Step 5: Routing logic
+
+def run(query):
+    validate(query)
+    complexity = detect_complexity(query)
+    if complexity == "simple":
+        result = single_agent(query)
+    else:
+        result = multi_agent(query)
+    logger.info({"complexity": complexity})
+    return result
+
+## Step 6: Evaluation hook
+
+def test():
+    res = run("Reset password")
+    assert res is not None
+
+## Wrap-up
+
+Key takeaways
+- Start simple and scale complexity
+- Multi-agent systems help with modularity
+- Clear roles are essential
+
+Common pitfalls
+- Overengineering early
+- No clear agent boundaries
+- Poor routing logic
+
+Next steps
+- Add LangGraph orchestration
+- Add monitoring
+- Improve routing logic

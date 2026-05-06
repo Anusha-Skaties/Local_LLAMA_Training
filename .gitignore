@@ -1,0 +1,28 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Data artifacts (generated)
+data/processed/
+*.jsonl
+
+# Training outputs
+adapters/
+outputs/
+runs/
+tb_logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# HF / datasets caches (optional; adjust to your setup)
+.cache/

@@ -1,0 +1,158 @@
+# How do you implement guardrails and hallucination mitigation in LLM systems?
+
+Well, basically, guardrails are rules that keep an AI system from giving incorrect or unsafe responses. They exist because LLMs can hallucinate or generate harmful content. Unlike a normal chatbot, production systems must enforce strict boundaries. A simple way to think about it is like putting safety checks around a powerful engine. A common mistake beginners make is relying only on prompts without adding validation layers.
+
+---
+
+## Real-world example
+
+A common pattern in large companies is adding multiple layers of safety checks around LLM systems. First, prompts include strict instructions to avoid hallucination. Second, outputs are validated using rules or secondary models. Third, sensitive queries are blocked or redirected. Systems often include refusal logic for unsupported questions. Logs are used to track unsafe outputs. Feedback loops help improve safety over time. This layered approach ensures reliability. Without guardrails, systems can produce misleading or harmful responses. That is why safety is treated as a core requirement in production.
+
+---
+
+## What you can use to build this
+
+### Production-level options
+
+**OpenAI API**
+Provides moderation and structured outputs.
+Production friendly because of built-in safety features.
+
+**Azure AI Content Safety**
+Used for filtering unsafe content.
+Production friendly because of compliance and scalability.
+
+---
+
+### Experimentation options
+
+**Guardrails AI**
+Useful for testing constraints.
+
+**Promptfoo**
+Good for testing safety prompts.
+
+---
+
+## Production Example using OpenAI + Azure Content Safety
+
+### Setup explanation
+
+We will build a system with multiple safety layers. Many tutorials only use prompts, but we will add validation and moderation. We will check inputs before sending them to the model. We will add retries for API failures. We will include timeouts. We will validate outputs to detect hallucinations. We will log all responses. We will also include refusal logic for unsupported queries. We will use environment variables for API keys. We will design prompts carefully. This setup ensures safer and more reliable responses.
+
+---
+
+### Setup code
+
+```python id="gr1"
+# pip install openai python-dotenv
+
+import os
+import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+```
+
+---
+
+## Step 1: Input validation
+
+```python id="gr2"
+def validate_input(query):
+    if not query:
+        raise ValueError("Invalid input")
+```
+
+---
+
+## Step 2: Safe prompt
+
+```python id="gr3"
+def build_prompt(query):
+    return f"""
+Answer only if you are sure.
+If not, say 'I don't know'.
+
+Question: {query}
+"""
+```
+
+---
+
+## Step 3: LLM call
+
+```python id="gr4"
+def generate(prompt):
+    res = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role":"user","content":prompt}],
+        timeout=10
+    )
+    return res.choices[0].message.content
+```
+
+---
+
+## Step 4: Output validation
+
+```python id="gr5"
+def validate_output(response):
+    if "I don't know" in response:
+        return False
+    return True
+```
+
+---
+
+## Step 5: Pipeline
+
+```python id="gr6"
+def run(query):
+    validate_input(query)
+    prompt = build_prompt(query)
+    res = generate(prompt)
+    
+    if not validate_output(res):
+        return "Cannot answer safely"
+    
+    logger.info({"query": query, "response": res})
+    return res
+```
+
+---
+
+## Step 6: Test
+
+```python id="gr7"
+def test():
+    assert run("What is AI?") is not None
+```
+
+---
+
+## Wrap-up
+
+### Key takeaways
+
+* Guardrails require multiple layers
+* Validation is critical
+* Logging helps detect issues
+
+### Common pitfalls
+
+* Only using prompts
+* No output checks
+* Ignoring unsafe inputs
+
+### Next steps
+
+* Add moderation APIs
+* Add feedback loops
+* Improve validation

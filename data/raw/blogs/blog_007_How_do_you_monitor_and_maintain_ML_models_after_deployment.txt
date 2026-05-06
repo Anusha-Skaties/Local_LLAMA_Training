@@ -1,0 +1,8 @@
+How do you monitor and maintain ML models after deployment?
+
+Well, basically, monitoring and maintaining ML models means keeping an eye on how they behave in the real world to make sure they stay accurate over time. It exists because models are not static; the world changes, and a model that worked yesterday might give wrong answers today. Unlike monitoring a normal web server where you just check if it is up or down, ML monitoring requires checking the actual data and predictions for quality. A simple way to think about it is like a pilot checking the dashboard during a long flight to ensure everything is still on track. One common mistake beginners make is only monitoring CPU or memory while ignoring prediction quality.
+
+Real-world example
+
+A strong real-world example is JP Morgan Chase. They use internal monitoring systems for credit risk models that evaluate loan decisions. These systems continuously track how predictions behave over time. If the distribution of outputs shifts too much, alerts are triggered. Engineers then investigate whether the issue comes from data changes or model degradation. This helps prevent large-scale financial errors before they happen.
+

@@ -1,0 +1,38 @@
+# How do you determine the right model size vs cost trade-off?
+
+Well, basically, finding the right model size is about deciding whether you need a giant, expensive brain for a hard task or a small, cheap brain for a simple one. It exists because the biggest models cost a lot of money and take a long time to think, which can ruin your budget and annoy your users. Unlike a basic chatbot project, a production system has a real bill at the end of the month that you need to justify. A simple way to think about it is like hiring a team where you don't need a senior engineer with a PhD just to sort some emails. One common beginner mistake is using the most powerful model available for every single task without testing if a smaller one could do it just as well.
+
+## Real-world example
+
+Notion uses a very smart model trade-off strategy for their AI writing features. They route simple tasks to smaller models and complex tasks to larger ones. This keeps performance fast and costs manageable.
+
+## What you can use to build this
+
+OpenAI API  
+Anthropic Claude API  
+Amazon Bedrock  
+
+## Production Example
+
+```python
+def route_task(complexity):
+    if complexity == "simple":
+        return "cheap_model"
+    return "smart_model"
+```
+
+## Wrap-up
+
+Key takeaways
+- Use small models when possible
+- Route tasks intelligently
+- Monitor cost
+
+Common pitfalls
+- Always using large models
+- Ignoring latency
+- No cost tracking
+
+Next steps
+- Add monitoring
+- Add routing logic

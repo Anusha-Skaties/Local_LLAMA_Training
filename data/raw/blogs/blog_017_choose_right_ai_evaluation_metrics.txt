@@ -1,0 +1,80 @@
+# How do you choose the right evaluation metrics for your AI system?
+
+Well, basically, choosing evaluation metrics means deciding how you measure whether your AI system is working correctly. It exists because different problems require different ways of measuring success. Unlike simple systems, AI outputs can be subjective and context-dependent. A simple way to think about it is choosing the right exam to test your system. A common mistake beginners make is using generic metrics that do not match the problem.
+
+## Real-world example
+
+A common pattern in large companies is selecting metrics based on business goals. For recommendation systems, metrics like click-through rate are used. For fraud detection, precision and recall are more important. Teams define success criteria before building models. Metrics are tracked continuously after deployment. Feedback loops help refine evaluation strategies. This ensures alignment with business objectives. Without proper metrics, systems may optimize the wrong behavior. Choosing the right metrics is critical for success.
+
+## What you can use to build this
+
+### Production-level options
+
+- MLflow: Used for tracking metrics and experiments. Production friendly because of reproducibility.
+- Evidently: Used for monitoring metrics over time. Production friendly because of dashboards.
+
+### Experimentation options
+
+- Scikit-learn: Provides metric functions.
+- Matplotlib: Useful for visualization.
+
+## Production Example using MLflow + Scikit-learn
+
+### Setup explanation
+
+We will build a system that calculates and tracks metrics. Many tutorials use basic metrics, but production systems need multiple metrics. We will include validation checks. We will log metrics. We will design reusable functions. We will include evaluation hooks. We will use structured logging. This ensures reliable evaluation.
+
+### Setup code
+
+# pip install scikit-learn mlflow
+
+import logging
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+## Step 1: Validation
+
+def validate(y_true, y_pred):
+    if len(y_true) != len(y_pred):
+        raise ValueError("Invalid input")
+
+## Step 2: Metrics
+
+def compute(y_true, y_pred):
+    return {
+        "accuracy": accuracy_score(y_true, y_pred),
+        "precision": precision_score(y_true, y_pred),
+        "recall": recall_score(y_true, y_pred)
+    }
+
+## Step 3: Pipeline
+
+def run(y_true, y_pred):
+    validate(y_true, y_pred)
+    metrics = compute(y_true, y_pred)
+    logger.info(metrics)
+    return metrics
+
+## Step 4: Test
+
+def test():
+    assert run([1,0],[1,0]) is not None
+
+## Wrap-up
+
+Key takeaways
+- Metrics must match the problem
+- Multiple metrics are needed
+- Continuous tracking is important
+
+Common pitfalls
+- Using wrong metrics
+- Ignoring business goals
+- No monitoring
+
+Next steps
+- Add dashboards
+- Improve evaluation
+- Align with business goals

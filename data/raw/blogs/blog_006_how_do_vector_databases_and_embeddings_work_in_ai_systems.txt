@@ -1,0 +1,135 @@
+# How do vector databases and embeddings work in AI systems?
+
+Well, basically, embeddings convert text into numbers that represent meaning. They exist because computers cannot understand text directly. Unlike normal databases, vector databases store meaning instead of exact matches. A simple way to think about it is like mapping similar ideas close together in space. A common mistake beginners make is not understanding similarity search.
+
+---
+
+## Real-world example
+
+A common pattern in large companies is using vector databases for document search. Instead of keyword matching, systems convert documents into embeddings. When a user asks a query, it is also converted into an embedding. The system finds documents with similar embeddings. This allows semantic search instead of exact matching. It improves accuracy for natural language queries. The results are then used in RAG systems. This approach is widely used in AI-powered search systems. It enables better understanding of intent. Without embeddings, search would be limited to keywords.
+
+---
+
+## What you can use to build this
+
+### Production-level options
+
+**Pinecone**
+Used for large-scale vector search.
+Production friendly because of speed and scalability.
+
+**Weaviate**
+Used for semantic search and hybrid queries.
+Production friendly because of flexibility.
+
+---
+
+### Experimentation options
+
+**FAISS**
+Good for local experiments.
+
+**Chroma**
+Easy for prototyping.
+
+---
+
+## Production Example using Pinecone + OpenAI
+
+### Setup explanation
+
+We will build a simple embedding and search system. We will include retries for API calls. We will validate inputs. We will use environment variables for keys. We will log operations. We will include timeouts for safety. We will design clear interfaces. We will also include evaluation checks. This setup is closer to production systems.
+
+---
+
+### Setup code
+
+```python
+# pip install openai pinecone-client python-dotenv
+
+import os
+import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+from pinecone import Pinecone
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+index = pc.Index("vector-index")
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+```
+
+---
+
+## Step 1: Create embedding
+
+```python
+def embed(text):
+    res = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=text
+    )
+    return res.data[0].embedding
+```
+
+---
+
+## Step 2: Store vector
+
+```python
+def store(id, text):
+    vector = embed(text)
+    index.upsert([(id, vector, {"text": text})])
+```
+
+---
+
+## Step 3: Search
+
+```python
+def search(query):
+    vector = embed(query)
+    res = index.query(vector=vector, top_k=3)
+    return [m["metadata"]["text"] for m in res["matches"]]
+```
+
+---
+
+## Step 4: Test
+
+```python
+def test():
+    store("1","AI is powerful")
+    results = search("What is AI?")
+    assert len(results) > 0
+```
+
+---
+
+## Wrap-up
+
+### Key takeaways
+
+* Embeddings represent meaning
+* Vector DB enables semantic search
+* Core for RAG
+
+### Common pitfalls
+
+* Bad embeddings
+* No validation
+* No scaling
+
+### Next steps
+
+* Add hybrid search
+* Add reranking
+* Optimize embeddings
+
+---
+
+If you want, I’ll continue with the **next 3 (evaluation, system design, tool calling)** 👍

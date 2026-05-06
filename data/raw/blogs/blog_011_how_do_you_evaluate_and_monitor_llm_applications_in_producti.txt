@@ -1,0 +1,153 @@
+# How do you evaluate and monitor LLM applications in production?
+
+Well, basically, evaluation means checking if your AI is giving correct and useful answers. It exists because LLMs can be wrong, even when they sound confident. Unlike a normal chatbot, production systems must measure quality continuously. A simple way to think about it is like unit testing and monitoring for AI. A common mistake beginners make is only testing manually instead of automating evaluation.
+
+---
+
+## Real-world example
+
+A common pattern in large companies is tracking AI performance through logs and feedback loops. Every user query and response is stored with metadata. Metrics like response accuracy, latency, and user satisfaction are tracked. When a response is flagged as incorrect, it is reviewed and used to improve prompts or retrieval. Some systems include automatic evaluation using smaller models or rules. This helps detect hallucinations or unsafe outputs. Over time, teams build dashboards to monitor trends. This allows them to catch issues early. Without monitoring, systems degrade silently. Evaluation is not a one-time step, it is continuous.
+
+---
+
+## What you can use to build this
+
+### Production-level options (proven in real companies)
+
+**LangSmith**
+Good for tracing and debugging LLM workflows.
+Production friendly because it provides structured logs and traces.
+
+**Datadog**
+Used for metrics and alerting.
+Production friendly because of scalability and integrations.
+
+---
+
+### Experimentation / prototyping options
+
+**Weights & Biases**
+Good for experiment tracking.
+
+**Promptfoo**
+Good for testing prompts quickly.
+
+---
+
+## Production Example using LangSmith + Datadog
+
+### Setup explanation
+
+We will build a simple evaluation pipeline that logs every request and measures quality. Many tutorials ignore monitoring, but this is one of the most important parts. We will log queries, responses, and latency. We will add retries and timeouts for API calls. We will include validation checks. We will also create a simple evaluation function that checks response quality. In real systems, this could be more advanced. We will use environment variables for keys. We will structure logs so they can be analyzed later. This setup helps detect issues early.
+
+---
+
+### Setup code
+
+```python
+# pip install openai python-dotenv
+
+import os
+import logging
+from dotenv import load_dotenv
+from openai import OpenAI
+import time
+
+load_dotenv()
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+```
+
+---
+
+## Step 1: Query handler
+
+```python
+def handle_query(query):
+    start = time.time()
+    
+    if not query:
+        raise ValueError("Invalid query")
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": query}],
+        timeout=10
+    )
+    
+    latency = time.time() - start
+    
+    result = response.choices[0].message.content
+    
+    logger.info({
+        "query": query,
+        "response": result,
+        "latency": latency
+    })
+    
+    return result
+```
+
+---
+
+## Step 2: Evaluation function
+
+```python
+def evaluate(query, response):
+    if len(response) < 5:
+        return False
+    return True
+```
+
+---
+
+## Step 3: Pipeline
+
+```python
+def run(query):
+    response = handle_query(query)
+    score = evaluate(query, response)
+    
+    logger.info({"evaluation": score})
+    
+    return response
+```
+
+---
+
+## Step 4: Test
+
+```python
+def test():
+    res = run("What is AI?")
+    assert res is not None
+```
+
+---
+
+## Wrap-up
+
+### Key takeaways
+
+* Monitoring is continuous
+* Logs are critical
+* Evaluation must be automated
+
+### Common pitfalls
+
+* No logging
+* Manual testing only
+* Ignoring latency
+
+### Next steps
+
+* Add dashboards
+* Add alerts
+* Improve evaluation metrics
+
+---
+
+If you want, I’ll continue with the **next 3 blogs (RAG deep dive, prompt engineering, vector DBs)** in the same format.

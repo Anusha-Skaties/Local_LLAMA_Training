@@ -1,0 +1,21 @@
+# azure/data_asset.yml
+# Azure ML data asset definition for the SFT conversation dataset.
+#
+# Register a new versioned snapshot with:
+#   az ml data create -f azure/data_asset.yml \
+#     --version <run_id> \
+#     --workspace-name <workspace> \
+#     --resource-group <rg>
+#
+# The <run_id> should match the preprocess/sft run_id (e.g. 20260411T235101Z)
+# so data versions map 1:1 to pipeline runs.
+#
+# Reference the latest version in jobs/code as:
+#   azureml:blog-sft-conversations@latest
+
+$schema: https://azuremlschemas.azureedge.net/latest/data.schema.json
+
+name: blog-sft-conversations
+type: uri_folder
+path: ../data/processed/sft/
+description: "QLoRA SFT conversation dataset (train/val splits). Version matches pipeline run_id."

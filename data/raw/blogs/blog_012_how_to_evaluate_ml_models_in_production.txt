@@ -1,0 +1,3 @@
+# How do you evaluate machine learning models properly in production?
+
+Well, basically, evaluating a machine learning model means checking how well it performs on real-world data, not just training data. It exists because a model that looks good during training can fail badly in production. Unlike simple experiments, production evaluation must be continuous and reliable. A simple way to think about it is like testing a product before and after launch. A common mistake beginners make is relying only on accuracy without considering real-world performance.
