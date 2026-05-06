@@ -63,6 +63,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--report-dir", default=str(REPORT_DIR))
     parser.add_argument("--min-assistant-chars", type=int, default=400)
     parser.add_argument("--max-short-assistant-percent", type=float, default=5.0)
+    parser.add_argument("--max-duplicate-assistant-percent", type=float, default=70.0,
+                        help="Warn only if duplicate assistant responses exceed this %% of total records. "
+                             "Default 70%% allows for 3-template-per-blog datasets.")
     parser.add_argument("--strict", action="store_true")
     return parser.parse_args()
 
@@ -219,8 +222,12 @@ def validate_dataset(args: argparse.Namespace) -> tuple[int, dict[str, Any]]:
             f"{short_percent:.2f}% < {args.min_assistant_chars} chars"
         )
 
-    if duplicate_assistant_count > 0:
-        state.warn(f"duplicate assistant responses detected: {duplicate_assistant_count}")
+    duplicate_percent = (duplicate_assistant_count / len(all_rows) * 100) if all_rows else 0.0
+    if duplicate_percent > args.max_duplicate_assistant_percent:
+        state.warn(
+            f"duplicate assistant responses detected: {duplicate_assistant_count} "
+            f"({duplicate_percent:.1f}% > threshold {args.max_duplicate_assistant_percent}%)"
+        )
 
     counts = {
         "all_records": len(all_rows),
