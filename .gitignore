@@ -11,9 +11,12 @@ venv/
 # Secrets
 .env
 
-# Data artifacts (generated)
-data/processed/
-*.jsonl
+# Data artifacts (generated — exclude intermediate outputs, keep SFT training data)
+data/processed/runs/
+data/processed/blog_chunks.jsonl
+data/processed/blog_corpus.jsonl
+data/processed/train.jsonl
+data/processed/val.jsonl
 
 # Training outputs
 adapters/
