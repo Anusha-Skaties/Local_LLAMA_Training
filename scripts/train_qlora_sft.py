@@ -252,6 +252,8 @@ class Args(argparse.Namespace):
     trust_remote_code: bool
     mlflow_experiment: str | None
     mlflow_tracking_uri: str | None
+    push_to_hub: bool
+    hf_hub_repo_id: str | None
 
 
 def parse_args() -> Args:
@@ -311,6 +313,11 @@ def parse_args() -> Args:
     parser.add_argument("--lora-task-type", default="CAUSAL_LM")
 
     parser.add_argument("--trust-remote-code", action="store_true", default=False)
+
+    parser.add_argument("--push-to-hub", action="store_true", default=False,
+                        help="Push trained adapter to HuggingFace Hub after training.")
+    parser.add_argument("--hf-hub-repo-id", default=None,
+                        help="HuggingFace Hub repo ID (e.g. username/llama-blog-sft). Required when --push-to-hub is set.")
 
     parser.add_argument(
         "--mlflow-experiment",
@@ -515,6 +522,15 @@ def train(args: Args) -> int:
 
     trainer.save_model(str(output_dir / "adapter"))
     tokenizer.save_pretrained(str(output_dir / "adapter"))
+
+    if args.push_to_hub:
+        if not args.hf_hub_repo_id:
+            logger.warning("--push-to-hub set but --hf-hub-repo-id not provided; skipping push.")
+        else:
+            logger.info("Pushing adapter to HuggingFace Hub: %s", args.hf_hub_repo_id)
+            trainer.model.push_to_hub(args.hf_hub_repo_id)
+            tokenizer.push_to_hub(args.hf_hub_repo_id)
+            logger.info("Push complete: https://huggingface.co/%s", args.hf_hub_repo_id)
 
     # Save trainer state and args snapshot for reproducibility.
     trainer.state.save_to_json(str(output_dir / "trainer_state.json"))

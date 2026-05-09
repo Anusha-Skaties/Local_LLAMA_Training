@@ -1,0 +1,43 @@
+name: Train on RunPod GPU
+
+on:
+  workflow_dispatch:
+    inputs:
+      gpu_type:
+        description: "RunPod GPU type"
+        required: true
+        default: "NVIDIA GeForce RTX 3090"
+        type: choice
+        options:
+          - "NVIDIA GeForce RTX 3090"
+          - "NVIDIA GeForce RTX 4090"
+          - "NVIDIA RTX A4000"
+          - "NVIDIA A40"
+      hf_hub_repo_id:
+        description: "HuggingFace Hub repo to push adapter (e.g. username/llama-blog-sft)"
+        required: true
+      epochs:
+        description: "Training epochs"
+        required: false
+        default: "3"
+
+jobs:
+  train:
+    name: Submit and monitor RunPod training job
+    runs-on: ubuntu-latest
+    timeout-minutes: 150  # 2.5 hrs max — adjust if using more epochs
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Submit training job and wait for completion
+        env:
+          RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_REPO_ID: ${{ inputs.hf_hub_repo_id }}
+          GITHUB_REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+          GPU_TYPE: ${{ inputs.gpu_type }}
+          TRAIN_EPOCHS: ${{ inputs.epochs }}
+          MAX_WAIT_MINUTES: "130"
+          # GITHUB_PAT: ${{ secrets.GH_PAT }}  # Uncomment for private repos
+        run: python3 scripts/runpod_submit.py
