@@ -70,6 +70,19 @@ jobs:
       - name: Install Azure ML CLI
         run: az extension add --name ml --yes
 
+      - name: Build and register custom environment
+        # Copies requirements.txt into azure/ so the Dockerfile COPY can find it,
+        # then registers the environment. Azure ML skips the build if the image
+        # already exists for this exact Dockerfile + requirements.txt content hash.
+        run: |
+          cp requirements.txt azure/requirements.txt
+          az ml environment create \
+            --file azure/environment.yml \
+            --workspace-name "$AML_WORKSPACE" \
+            --resource-group "$AML_RESOURCE_GROUP" \
+            --subscription "$AML_SUBSCRIPTION"
+          rm azure/requirements.txt
+
       - name: Upload data assets
         run: |
           RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)

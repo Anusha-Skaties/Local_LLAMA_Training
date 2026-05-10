@@ -45,7 +45,7 @@ import numpy as np
 import torch
 from datasets import DatasetDict, load_dataset
 from peft import LoraConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TrainerCallback, TrainerControl, TrainerState, set_seed
 from trl import SFTConfig, SFTTrainer
 
 # ── Optional MLflow ────────────────────────────────────────────────────────────
@@ -54,6 +54,29 @@ try:
     _MLFLOW_AVAILABLE = True
 except ImportError:
     _MLFLOW_AVAILABLE = False
+
+
+class _MlflowStepCallback(TrainerCallback):
+    """Logs per-step training metrics to the active MLflow run.
+
+    Used instead of report_to='mlflow' to avoid Azure ML's 200-parameter
+    limit — HF Trainer logs all 208 TrainingArguments fields as params which
+    crashes on_train_begin.
+    """
+
+    def on_log(
+        self,
+        args: Any,
+        state: TrainerState,
+        control: TrainerControl,
+        logs: dict | None = None,
+        **kwargs: Any,
+    ) -> None:
+        if not _MLFLOW_AVAILABLE or not mlflow.active_run() or not logs:
+            return
+        step_metrics = {k: float(v) for k, v in logs.items() if isinstance(v, (int, float))}
+        if step_metrics:
+            mlflow.log_metrics(step_metrics, step=state.global_step)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -516,6 +539,7 @@ def train(args: Args) -> int:
         peft_config=lora_config,
         processing_class=tokenizer,
         max_seq_length=args.max_seq_length,
+        callbacks=[_MlflowStepCallback()] if (_MLFLOW_AVAILABLE and mlflow.active_run()) else None,
     )
 
     trainable_params, total_params = count_trainable_params(trainer.model)

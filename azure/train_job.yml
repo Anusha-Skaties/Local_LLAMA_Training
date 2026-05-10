@@ -16,14 +16,14 @@ type: command
 display_name: qlora-blog-sft
 experiment_name: qlora-blog-sft
 
-# NCasT4_v3 is cost-effective (T4 GPU); uses serverless compute to bypass subscription GPU quota limits.
-# Omitting 'compute' field triggers Azure ML serverless mode — no cluster needed.
-environment: azureml://registries/azureml/environments/acpt-pytorch-2.2-cuda12.1/labels/latest
+# Custom environment with all dependencies pre-installed at image build time.
+# Register with: az ml environment create -f azure/environment.yml --workspace-name <ws> --resource-group <rg>
+# Then bump the version here whenever requirements.txt changes.
+environment: azureml:qlora-sft-env@latest
 
-code: ..  # repo root — requirements.txt and scripts/ are here, not in azure/
+code: ..  # repo root — scripts/ is here
 
 command: >-
-  pip install -r requirements.txt &&
   python scripts/train_qlora_sft.py
   --model-name meta-llama/Llama-3.2-3B-Instruct
   --train-file ${{inputs.train_file}}/train_conversations.jsonl
@@ -36,7 +36,7 @@ command: >-
   --learning-rate 2e-4
   --eval-steps 5
   --save-steps 10
-  --report-to mlflow
+  --report-to none
   --mlflow-experiment qlora-blog-sft
 
 inputs:

@@ -1,0 +1,7 @@
+$schema: https://azuremlschemas.azureedge.net/latest/environment.schema.json
+
+name: qlora-sft-env
+description: "QLoRA SFT training environment with pinned dependencies."
+build:
+  path: .          # azure/ directory — Dockerfile and requirements.txt must be here
+  dockerfile_path: Dockerfile
