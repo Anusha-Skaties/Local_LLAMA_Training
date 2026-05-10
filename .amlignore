@@ -1,0 +1,30 @@
+# .amlignore — exclude files/dirs from Azure ML code snapshot upload
+# Syntax is identical to .gitignore
+
+# Data (large; passed as registered data assets instead)
+data/
+
+# Python environments
+venv/
+.venv/
+
+# Training outputs (produced by the job, not needed as inputs)
+outputs/
+adapters/
+runs/
+tb_logs/
+
+# Caches
+__pycache__/
+*.pyc
+.cache/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Secrets
+.env
+
+# Git history (excluded automatically by AML, listed here for clarity)
+.git/

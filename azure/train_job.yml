@@ -20,7 +20,7 @@ experiment_name: qlora-blog-sft
 # Omitting 'compute' field triggers Azure ML serverless mode — no cluster needed.
 environment: azureml://registries/azureml/environments/acpt-pytorch-2.2-cuda12.1/labels/latest
 
-code: .
+code: ..  # repo root — requirements.txt and scripts/ are here, not in azure/
 
 command: >-
   pip install -r requirements.txt &&
