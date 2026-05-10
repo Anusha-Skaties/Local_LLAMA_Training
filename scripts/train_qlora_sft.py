@@ -441,12 +441,18 @@ def train(args: Args) -> int:
         logger.warning("CUDA not available; disabling 4-bit quantization for this run.")
         use_4bit = False
 
+    # T4 GPUs don't support bfloat16 — fall back to float16 for bnb compute dtype.
+    bnb_compute_dtype = parse_dtype(args.bnb_4bit_compute_dtype)
+    if bnb_compute_dtype == torch.bfloat16 and not (torch.cuda.is_available() and torch.cuda.is_bf16_supported()):
+        logger.warning("bfloat16 not supported on this GPU; falling back to float16 for 4-bit compute dtype.")
+        bnb_compute_dtype = torch.float16
+
     quant_config = None
     if use_4bit:
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type=args.bnb_4bit_quant_type,
-            bnb_4bit_compute_dtype=parse_dtype(args.bnb_4bit_compute_dtype),
+            bnb_4bit_compute_dtype=bnb_compute_dtype,
             bnb_4bit_use_double_quant=args.bnb_4bit_use_double_quant,
         )
 
@@ -509,7 +515,6 @@ def train(args: Args) -> int:
         eval_dataset=dataset["validation"],
         peft_config=lora_config,
         processing_class=tokenizer,
-        dataset_text_field="text",
         max_seq_length=args.max_seq_length,
     )
 
