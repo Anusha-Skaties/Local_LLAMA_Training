@@ -473,7 +473,6 @@ def train(args: Args) -> int:
 
     training_args = SFTConfig(
         output_dir=str(output_dir),
-        max_seq_length=args.max_seq_length,
         packing=args.packing,
         per_device_train_batch_size=args.per_device_train_batch_size,
         per_device_eval_batch_size=args.per_device_eval_batch_size,
@@ -511,6 +510,7 @@ def train(args: Args) -> int:
         peft_config=lora_config,
         processing_class=tokenizer,
         dataset_text_field="text",
+        max_seq_length=args.max_seq_length,
     )
 
     trainable_params, total_params = count_trainable_params(trainer.model)
