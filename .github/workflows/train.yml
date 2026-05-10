@@ -89,6 +89,7 @@ jobs:
             --workspace-name "$AML_WORKSPACE" \
             --resource-group "$AML_RESOURCE_GROUP" \
             --subscription "$AML_SUBSCRIPTION" \
-            --set display_name="qlora-sft-staging-$(date -u +%Y%m%dT%H%M%SZ)"
+            --set display_name="qlora-sft-staging-$(date -u +%Y%m%dT%H%M%SZ)" \
+            --set environment_variables.HF_TOKEN="${{ secrets.HF_TOKEN }}"
 
 

@@ -34,8 +34,9 @@ command: >-
   --per-device-train-batch-size 1
   --gradient-accumulation-steps 16
   --learning-rate 2e-4
-  --eval-steps 50
-  --save-steps 50
+  --eval-steps 5
+  --save-steps 10
+  --report-to mlflow
   --mlflow-experiment qlora-blog-sft
 
 inputs:

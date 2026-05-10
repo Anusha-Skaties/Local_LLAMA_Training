@@ -293,7 +293,7 @@ def parse_args() -> Args:
 
     parser.add_argument("--gradient-checkpointing", action="store_true", default=True)
     parser.add_argument("--group-by-length", action="store_true", default=True)
-    parser.add_argument("--dataloader-num-workers", type=int, default=2)
+    parser.add_argument("--dataloader-num-workers", type=int, default=0)
 
     parser.add_argument("--report-to", default="none", help="none,tensorboard,wandb or comma-separated list")
 
@@ -433,6 +433,8 @@ def train(args: Args) -> int:
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Decoder-only models must pad on the right during SFT to avoid label masking issues.
+    tokenizer.padding_side = "right"
 
     use_4bit = args.use_4bit
     if use_4bit and not torch.cuda.is_available():
@@ -490,6 +492,9 @@ def train(args: Args) -> int:
         save_total_limit=args.save_total_limit,
         logging_steps=args.logging_steps,
         gradient_checkpointing=args.gradient_checkpointing,
+        # use_reentrant=False is required for PEFT/LoRA + gradient checkpointing to avoid
+        # backward-pass errors and silent hangs with newer versions of transformers/PEFT.
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         group_by_length=args.group_by_length,
         dataloader_num_workers=args.dataloader_num_workers,
         report_to=parse_report_to(args.report_to),
