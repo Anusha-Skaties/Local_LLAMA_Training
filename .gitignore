@@ -10,6 +10,18 @@ venv/
 
 # Secrets
 .env
+.env.local
+.env.*.local
+.env.development
+.env.staging
+.env.production
+
+# Runtime metadata — contain absolute local paths/username, not safe for public repo
+data/meta/logs/
+data/meta/preprocess_runs/
+data/meta/sft_runs/
+data/meta/validation_runs/
+data/meta/training_runs/
 
 # Data artifacts (generated — exclude intermediate outputs, keep SFT training data)
 data/processed/runs/
