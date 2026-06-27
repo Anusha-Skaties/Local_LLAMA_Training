@@ -1,0 +1,61 @@
+# evaluation_platform/configs/experiments/rag_eval.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Template for RAG pipeline evaluation.
+# Populate dataset.path with your RAG test set before running.
+
+name: "rag-pipeline-eval"
+description: "Evaluation of RAG pipeline with context precision, recall, and faithfulness"
+
+model_name: "meta-llama/Llama-3.2-3B-Instruct"
+task_type: "rag"
+
+dataset:
+  name: "rag_test_set"
+  format: "jsonl"
+  path: "data/processed/rag/test.jsonl"   # expects: {id, input, reference, contexts}
+  max_samples: 100
+  extra:
+    task_type: "rag"
+
+evaluators:
+  - name: "ragas"
+    enabled: true
+    threshold: 0.5
+    extra:
+      metrics:
+        - "context_precision"
+        - "context_recall"
+        - "faithfulness"
+        - "answer_relevancy"
+
+  - name: "faithfulness"
+    enabled: true
+    threshold: 0.5
+
+  - name: "hallucination"
+    enabled: true
+    threshold: 0.5
+
+  - name: "contextual_precision"
+    enabled: true
+    threshold: 0.5
+
+  - name: "contextual_recall"
+    enabled: true
+    threshold: 0.5
+
+  - name: "lexical"
+    enabled: true
+
+  - name: "semantic"
+    enabled: true
+    batch_size: 4
+
+  - name: "performance"
+    enabled: true
+
+mlflow_experiment: "rag-eval"
+output_dir: "outputs/eval_runs"
+
+tags:
+  task: "rag"

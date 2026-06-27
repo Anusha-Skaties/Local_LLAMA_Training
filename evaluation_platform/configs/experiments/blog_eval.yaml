@@ -1,0 +1,82 @@
+# evaluation_platform/configs/experiments/blog_eval.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment configuration for evaluating your trained Llama 3.2 blog model.
+# Run with:
+#   python -m evaluation_platform.cli.main run \
+#       --config evaluation_platform/configs/experiments/blog_eval.yaml
+
+name: "llama-blog-sft-eval"
+description: "Post-training evaluation of QLoRA SFT adapter on blog generation"
+
+model_name: "meta-llama/Llama-3.2-3B-Instruct"
+model_version: "qlora_sft_20260510T231440Z"
+adapter_dir: "outputs/named-outputs/model_output/qlora_sft_20260510T231440Z/adapter"
+
+task_type: "generation"
+
+dataset:
+  name: "blog_sft_val"
+  format: "jsonl"
+  path: "data/processed/sft/val_conversations.jsonl"
+  max_samples: null          # null = use all samples
+  shuffle: false
+  extra:
+    task_type: "generation"
+
+evaluators:
+  - name: "lexical"
+    enabled: true
+    threshold: 0.3
+    extra:
+      metrics: ["rouge1", "rouge2", "rougeL", "bleu", "meteor"]
+
+  - name: "semantic"
+    enabled: true
+    threshold: 0.6
+    batch_size: 8
+    extra:
+      metrics: ["bertscore", "cosine_similarity"]
+      bert_model: "microsoft/deberta-xlarge-mnli"
+      st_model: "all-MiniLM-L6-v2"
+
+  - name: "performance"
+    enabled: true
+    # threshold = max acceptable latency in ms
+    threshold: 5000
+
+  # ── DeepEval LLM-judge metrics (requires OPENAI_API_KEY) ────────────────────
+  - name: "answer_relevancy"
+    enabled: false          # set to true when you have an OpenAI key
+    threshold: 0.5
+
+  - name: "toxicity"
+    enabled: false
+    threshold: 0.5
+
+  - name: "bias"
+    enabled: false
+    threshold: 0.5
+
+  - name: "geval"
+    enabled: false
+    threshold: 0.5
+    extra:
+      criteria: >
+        Assess whether the blog post is well-structured, practically useful,
+        and accurate for an audience of engineering leaders and startup CTOs.
+        Check for: clear headings, real-world examples, actionable advice,
+        and a professional technical tone.
+      name_override: "blog_quality_geval"
+
+tracing:
+  otel_enabled: false
+  langsmith_enabled: false
+  langsmith_project: "llama-blog-eval"
+
+mlflow_experiment: "qlora-blog-sft"
+output_dir: "outputs/eval_runs"
+
+tags:
+  base_model: "llama-3.2-3B"
+  training: "qlora_sft"
+  dataset: "blog_sft"

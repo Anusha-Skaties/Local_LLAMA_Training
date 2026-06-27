@@ -1,0 +1,180 @@
+name: Evaluate Fine-Tuned Model
+
+on:
+  workflow_run:
+    workflows: ["Train on RunPod"]
+    types: [completed]
+  push:
+    paths:
+      - "evaluation_platform/**"
+      - "scripts/evaluate_model.py"
+      - "requirements_eval.txt"
+  workflow_dispatch:
+    inputs:
+      max_samples:
+        description: "Max samples to evaluate (leave empty for all)"
+        required: false
+        default: ""
+      baseline_run_id:
+        description: "Baseline run_id for regression check (optional)"
+        required: false
+        default: ""
+
+concurrency:
+  group: evaluate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Unit tests (no GPU required) ────────────────────────────────────────
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name != 'workflow_run' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install evaluation platform dependencies
+        run: pip install -r requirements_eval.txt
+
+      - name: Run unit and API tests (no GPU)
+        run: |
+          pytest evaluation_platform/tests/ \
+            --ignore=evaluation_platform/tests/test_generation_pipeline.py \
+            -v \
+            --tb=short \
+            --junit-xml=reports/unit_tests.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: reports/unit_tests.xml
+
+  # ── 2. Full evaluation run (self-hosted GPU runner or CPU for quick check) ──
+  run-evaluation:
+    name: Run Evaluation Pipeline
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: ${{ needs.unit-tests.result == 'success' }}
+
+    env:
+      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'mlruns' }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install evaluation platform dependencies
+        run: pip install -r requirements_eval.txt
+
+      - name: Build max_samples flag
+        id: build_args
+        run: |
+          if [ -n "${{ github.event.inputs.max_samples }}" ]; then
+            echo "max_samples_flag=--max-samples ${{ github.event.inputs.max_samples }}" >> $GITHUB_OUTPUT
+          else
+            echo "max_samples_flag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run evaluation (lexical + semantic, no LLM judge)
+        run: |
+          python -m evaluation_platform.cli.main run \
+            --config evaluation_platform/configs/experiments/blog_eval.yaml \
+            --output-dir outputs/eval_runs/ci_${{ github.run_id }} \
+            ${{ steps.build_args.outputs.max_samples_flag }}
+
+      - name: Find current report
+        id: find_report
+        run: |
+          REPORT=$(find outputs/eval_runs/ci_${{ github.run_id }} -name "report.json" | head -1)
+          echo "report_path=$REPORT" >> $GITHUB_OUTPUT
+
+      - name: Upload evaluation reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-${{ github.run_id }}
+          path: outputs/eval_runs/ci_${{ github.run_id }}/
+
+      - name: Save run ID to file (for regression check)
+        run: echo "${{ github.run_id }}" > outputs/eval_runs/latest_ci_run_id.txt
+
+  # ── 3. Regression check ────────────────────────────────────────────────────
+  regression-check:
+    name: Regression Check
+    runs-on: ubuntu-latest
+    needs: run-evaluation
+    if: ${{ github.event.inputs.baseline_run_id != '' || github.event_name == 'workflow_run' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install evaluation platform dependencies
+        run: pip install -r requirements_eval.txt
+
+      - name: Download current evaluation reports
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-reports-${{ github.run_id }}
+          path: current_reports/
+
+      - name: Download baseline evaluation reports
+        if: ${{ github.event.inputs.baseline_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: eval-reports-${{ github.event.inputs.baseline_run_id }}
+          path: baseline_reports/
+
+      - name: Find report paths
+        id: find_paths
+        run: |
+          CURRENT=$(find current_reports -name "report.json" | head -1)
+          BASELINE=$(find baseline_reports -name "report.json" 2>/dev/null | head -1 || echo "")
+          echo "current=$CURRENT" >> $GITHUB_OUTPUT
+          echo "baseline=$BASELINE" >> $GITHUB_OUTPUT
+
+      - name: Run regression check
+        if: ${{ steps.find_paths.outputs.baseline != '' }}
+        run: |
+          python -m evaluation_platform.cli.main regression-check \
+            --baseline "${{ steps.find_paths.outputs.baseline }}" \
+            --current  "${{ steps.find_paths.outputs.current }}" \
+            --threshold 5.0
+
+      - name: Skip regression (no baseline)
+        if: ${{ steps.find_paths.outputs.baseline == '' }}
+        run: echo "No baseline found — skipping regression check for this run."
+
+  # ── 4. Notify on completion ────────────────────────────────────────────────
+  notify:
+    name: Notify Completion
+    runs-on: ubuntu-latest
+    needs: [unit-tests, run-evaluation, regression-check]
+    if: always()
+
+    steps:
+      - name: Report outcome
+        run: |
+          echo "unit-tests:      ${{ needs.unit-tests.result }}"
+          echo "run-evaluation:  ${{ needs.run-evaluation.result }}"
+          echo "regression:      ${{ needs.regression-check.result }}"

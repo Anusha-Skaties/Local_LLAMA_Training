@@ -203,11 +203,27 @@ def evaluate(args: argparse.Namespace) -> int:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    base_model = AutoModelForCausalLM.from_pretrained(
-        args.base_model,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-    )
+    # 4-bit quantization: reduces memory from ~6 GB to ~2 GB.
+    # Safe for evaluation on an 8 GB MacBook (Apple M2 unified memory).
+    try:
+        from transformers import BitsAndBytesConfig  # type: ignore
+        import bitsandbytes  # noqa - just check it's installed
+        quant_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_compute_dtype=torch.float16)
+        base_model = AutoModelForCausalLM.from_pretrained(
+            args.base_model,
+            quantization_config=quant_config,
+            device_map="auto",
+        )
+        logger.info("Loaded in 4-bit quantization (~2 GB RAM)")
+    except (ImportError, Exception):
+        # bitsandbytes not available (e.g. Apple Silicon without MPS support) — fall back
+        base_model = AutoModelForCausalLM.from_pretrained(
+            args.base_model,
+            torch_dtype=torch.float32,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+        )
+        logger.info("Loaded in float32 (bitsandbytes not available)")
     model = PeftModel.from_pretrained(base_model, args.adapter_dir)
     model.eval()
     logger.info("Adapter loaded from: %s", args.adapter_dir)
