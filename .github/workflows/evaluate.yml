@@ -91,20 +91,38 @@ jobs:
             echo "max_samples_flag=" >> $GITHUB_OUTPUT
           fi
 
+      - name: Check adapter exists
+        id: check_adapter
+        run: |
+          if [ -d "outputs/named-outputs/model_output" ]; then
+            echo "adapter_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "adapter_exists=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Adapter not found on this runner — skipping inference eval."
+            echo "To run full eval, use a self-hosted runner or upload adapter to HF Hub."
+          fi
+
       - name: Run evaluation (lexical + semantic, no LLM judge)
+        if: steps.check_adapter.outputs.adapter_exists == 'true'
         run: |
           python -m evaluation_platform.cli.main run \
             --config evaluation_platform/configs/experiments/blog_eval.yaml \
             --output-dir outputs/eval_runs/ci_${{ github.run_id }} \
             ${{ steps.build_args.outputs.max_samples_flag }}
 
+      - name: Skip eval (no adapter on runner)
+        if: steps.check_adapter.outputs.adapter_exists == 'false'
+        run: echo "Full eval skipped — unit tests are the quality gate on GitHub runners."
+
       - name: Find current report
         id: find_report
+        if: steps.check_adapter.outputs.adapter_exists == 'true'
         run: |
           REPORT=$(find outputs/eval_runs/ci_${{ github.run_id }} -name "report.json" | head -1)
           echo "report_path=$REPORT" >> $GITHUB_OUTPUT
 
       - name: Upload evaluation reports
+        if: steps.check_adapter.outputs.adapter_exists == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: eval-reports-${{ github.run_id }}
