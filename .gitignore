@@ -40,4 +40,4 @@ tb_logs/
 .ipynb_checkpoints/
 
 # HF / datasets caches (optional; adjust to your setup)
-.cache/
+.cache/mlflow.db

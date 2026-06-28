@@ -355,7 +355,6 @@ def parse_args() -> Args:
 
     return parser.parse_args(namespace=Args())
 
-
 def validate_paths(args: Args) -> tuple[Path, Path, Path, Path, Path]:
     train_path = Path(args.train_file)
     val_path = Path(args.val_file)
@@ -376,7 +375,6 @@ def validate_paths(args: Args) -> tuple[Path, Path, Path, Path, Path]:
     run_meta_dir.mkdir(parents=True, exist_ok=True)
 
     return train_path, val_path, output_dir, run_meta_dir, log_path
-
 
 def seed_everything(seed: int) -> None:
     random.seed(seed)
