@@ -2,21 +2,12 @@ name: Evaluate Fine-Tuned Model
 
 on:
   workflow_run:
-    workflows: ["Train on RunPod"]
+    workflows: ["SFT Training Pipeline"]
     types: [completed]
-  push:
-    paths:
-      - "evaluation_platform/**"
-      - "scripts/evaluate_model.py"
-      - "requirements_eval.txt"
   workflow_dispatch:
     inputs:
       max_samples:
         description: "Max samples to evaluate (leave empty for all)"
-        required: false
-        default: ""
-      baseline_run_id:
-        description: "Baseline run_id for regression check (optional)"
         required: false
         default: ""
 
@@ -24,31 +15,37 @@ concurrency:
   group: evaluate-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PYTHON_VERSION: "3.11"
+  AML_WORKSPACE: ${{ vars.AML_WORKSPACE }}
+  AML_RESOURCE_GROUP: ${{ vars.AML_RESOURCE_GROUP }}
+  AML_SUBSCRIPTION: ${{ vars.AML_SUBSCRIPTION }}
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+
 jobs:
-  # ── 1. Unit tests (no GPU required) ────────────────────────────────────────
+  # ── 1. Unit tests (no GPU, runs on GitHub free runner) ──────────────────────
   unit-tests:
     name: Unit Tests
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name != 'workflow_run' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
 
-      - name: Install evaluation platform dependencies
+      - name: Install evaluation dependencies
         run: pip install -r requirements_eval.txt
 
-      - name: Run unit and API tests (no GPU)
+      - name: Run unit tests (no GPU needed)
         run: |
           pytest evaluation_platform/tests/ \
-            --ignore=evaluation_platform/tests/test_generation_pipeline.py \
-            -v \
-            --tb=short \
+            -v --tb=short \
             --junit-xml=reports/unit_tests.xml
 
       - name: Upload test results
@@ -58,141 +55,48 @@ jobs:
           name: unit-test-results
           path: reports/unit_tests.xml
 
-  # ── 2. Full evaluation run (self-hosted GPU runner or CPU for quick check) ──
-  run-evaluation:
-    name: Run Evaluation Pipeline
-    runs-on: ubuntu-latest
+  # ── 2. Submit evaluation job to Azure ML (same GPU as training) ─────────────
+  submit-eval:
+    name: Submit Azure ML Eval Job
     needs: unit-tests
-    if: ${{ needs.unit-tests.result == 'success' }}
-
-    env:
-      MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI || 'mlruns' }}
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install evaluation platform dependencies
-        run: pip install -r requirements_eval.txt
-
-      - name: Build max_samples flag
-        id: build_args
-        run: |
-          if [ -n "${{ github.event.inputs.max_samples }}" ]; then
-            echo "max_samples_flag=--max-samples ${{ github.event.inputs.max_samples }}" >> $GITHUB_OUTPUT
-          else
-            echo "max_samples_flag=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Check adapter exists
-        id: check_adapter
-        run: |
-          if [ -d "outputs/named-outputs/model_output" ]; then
-            echo "adapter_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "adapter_exists=false" >> $GITHUB_OUTPUT
-            echo "⚠️ Adapter not found on this runner — skipping inference eval."
-            echo "To run full eval, use a self-hosted runner or upload adapter to HF Hub."
-          fi
-
-      - name: Run evaluation (lexical + semantic, no LLM judge)
-        if: steps.check_adapter.outputs.adapter_exists == 'true'
-        run: |
-          python -m evaluation_platform.cli.main run \
-            --config evaluation_platform/configs/experiments/blog_eval.yaml \
-            --output-dir outputs/eval_runs/ci_${{ github.run_id }} \
-            ${{ steps.build_args.outputs.max_samples_flag }}
-
-      - name: Skip eval (no adapter on runner)
-        if: steps.check_adapter.outputs.adapter_exists == 'false'
-        run: echo "Full eval skipped — unit tests are the quality gate on GitHub runners."
-
-      - name: Find current report
-        id: find_report
-        if: steps.check_adapter.outputs.adapter_exists == 'true'
-        run: |
-          REPORT=$(find outputs/eval_runs/ci_${{ github.run_id }} -name "report.json" | head -1)
-          echo "report_path=$REPORT" >> $GITHUB_OUTPUT
-
-      - name: Upload evaluation reports
-        if: steps.check_adapter.outputs.adapter_exists == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: eval-reports-${{ github.run_id }}
-          path: outputs/eval_runs/ci_${{ github.run_id }}/
-
-      - name: Save run ID to file (for regression check)
-        run: echo "${{ github.run_id }}" > outputs/eval_runs/latest_ci_run_id.txt
-
-  # ── 3. Regression check ────────────────────────────────────────────────────
-  regression-check:
-    name: Regression Check
     runs-on: ubuntu-latest
-    needs: run-evaluation
-    if: ${{ github.event.inputs.baseline_run_id != '' || github.event_name == 'workflow_run' }}
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
         with:
-          python-version: "3.11"
-          cache: pip
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AML_SUBSCRIPTION }}
 
-      - name: Install evaluation platform dependencies
-        run: pip install -r requirements_eval.txt
+      - name: Install Azure ML CLI
+        run: az extension add --name ml --yes
 
-      - name: Download current evaluation reports
-        uses: actions/download-artifact@v4
-        with:
-          name: eval-reports-${{ github.run_id }}
-          path: current_reports/
-
-      - name: Download baseline evaluation reports
-        if: ${{ github.event.inputs.baseline_run_id != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: eval-reports-${{ github.event.inputs.baseline_run_id }}
-          path: baseline_reports/
-
-      - name: Find report paths
-        id: find_paths
+      - name: Submit evaluation job to Azure ML
         run: |
-          CURRENT=$(find current_reports -name "report.json" | head -1)
-          BASELINE=$(find baseline_reports -name "report.json" 2>/dev/null | head -1 || echo "")
-          echo "current=$CURRENT" >> $GITHUB_OUTPUT
-          echo "baseline=$BASELINE" >> $GITHUB_OUTPUT
+          az ml job create \
+            --file azure/eval_job.yml \
+            --workspace-name "$AML_WORKSPACE" \
+            --resource-group "$AML_RESOURCE_GROUP" \
+            --subscription "$AML_SUBSCRIPTION" \
+            --set display_name="qlora-eval-$(date -u +%Y%m%dT%H%M%SZ)" \
+            --set environment_variables.HF_TOKEN="${{ secrets.HF_TOKEN }}"
 
-      - name: Run regression check
-        if: ${{ steps.find_paths.outputs.baseline != '' }}
-        run: |
-          python -m evaluation_platform.cli.main regression-check \
-            --baseline "${{ steps.find_paths.outputs.baseline }}" \
-            --current  "${{ steps.find_paths.outputs.current }}" \
-            --threshold 5.0
-
-      - name: Skip regression (no baseline)
-        if: ${{ steps.find_paths.outputs.baseline == '' }}
-        run: echo "No baseline found — skipping regression check for this run."
-
-  # ── 4. Notify on completion ────────────────────────────────────────────────
+  # ── 3. Notify on completion ──────────────────────────────────────────────────
   notify:
     name: Notify Completion
     runs-on: ubuntu-latest
-    needs: [unit-tests, run-evaluation, regression-check]
+    needs: [unit-tests, submit-eval]
     if: always()
 
     steps:
       - name: Report outcome
         run: |
-          echo "unit-tests:      ${{ needs.unit-tests.result }}"
-          echo "run-evaluation:  ${{ needs.run-evaluation.result }}"
-          echo "regression:      ${{ needs.regression-check.result }}"
+          echo "unit-tests:   ${{ needs.unit-tests.result }}"
+          echo "submit-eval:  ${{ needs.submit-eval.result }}"

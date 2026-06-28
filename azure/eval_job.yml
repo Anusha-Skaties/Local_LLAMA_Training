@@ -1,0 +1,44 @@
+# azure/eval_job.yml
+# Azure ML command job for evaluating the QLoRA SFT adapter.
+#
+# Submit with:
+#   az ml job create -f azure/eval_job.yml \
+#     --workspace-name <workspace> \
+#     --resource-group <rg>
+#
+# Or triggered automatically by the evaluate.yml GitHub Actions workflow
+# after a training run completes.
+
+$schema: https://azuremlschemas.azureedge.net/latest/commandJob.schema.json
+
+type: command
+
+display_name: qlora-blog-eval
+experiment_name: qlora-blog-eval
+
+# Reuses the same environment as training — all deps already installed.
+environment: azureml:qlora-sft-env@latest
+
+code: ..  # repo root
+
+command: >-
+  pip install -r requirements_eval.txt &&
+  python scripts/evaluate_model.py
+  --adapter-dir ${{inputs.model_output}}
+  --base-model meta-llama/Llama-3.2-3B-Instruct
+  --val-file ${{inputs.val_file}}/val_conversations.jsonl
+  --corpus-file ${{inputs.val_file}}/blog_corpus.jsonl
+  --mlflow-experiment qlora-blog-eval
+
+inputs:
+  model_output:
+    type: uri_folder
+    path: azureml:blog-sft-model@latest   # output from training job
+
+  val_file:
+    type: uri_folder
+    path: azureml:blog-sft-conversations@latest
+
+resources:
+  instance_type: Standard_NC4as_T4_v3   # same GPU as training
+  instance_count: 1
