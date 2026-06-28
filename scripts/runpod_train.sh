@@ -35,8 +35,12 @@ echo " HF repo: $HF_HUB_REPO_ID"
 echo "=============================================="
 
 # ── Authenticate with HuggingFace ─────────────────────────────────────────────
-pip install --quiet --upgrade huggingface_hub
-huggingface-cli login --token "$HF_TOKEN"
+pip install --quiet --upgrade "huggingface_hub[cli]"
+if command -v hf &>/dev/null; then
+    hf auth login --token "$HF_TOKEN"
+else
+    huggingface-cli login --token "$HF_TOKEN"
+fi
 
 # ── Clone repo ────────────────────────────────────────────────────────────────
 cd /workspace

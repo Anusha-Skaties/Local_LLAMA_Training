@@ -39,8 +39,13 @@ echo " MLflow : $MLFLOW_TRACKING_URI"
 echo "=============================================="
 
 # ── Authenticate with HuggingFace ─────────────────────────────────────────────
-pip install --quiet --upgrade huggingface_hub
-huggingface-cli login --token "$HF_TOKEN"
+pip install --quiet --upgrade "huggingface_hub[cli]"
+# Support both old (huggingface-cli) and new (hf) CLI
+if command -v hf &>/dev/null; then
+    hf auth login --token "$HF_TOKEN"
+else
+    huggingface-cli login --token "$HF_TOKEN"
+fi
 
 # ── Clone or update repo ───────────────────────────────────────────────────────
 cd /workspace
